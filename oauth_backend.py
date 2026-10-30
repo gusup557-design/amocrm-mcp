@@ -72,7 +72,7 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
         client_id = data["client_id"]
         secret = data.pop("client_secret", None)
         enc = encrypt(secret) if secret else None
-        await db("POST","mcp_oauth_clients",payload={"client_id":client_id,"client_secret_enc":enc,"client_metadata":data},prefer="resolution=merge-duplicates,return=minimal")
+        await db("POST","mcp_oauth_clients",payload={"client_id":client_id,"client_secret_enc":enc,"client_info":data},prefer="resolution=merge-duplicates,return=minimal")
 
     async def authorize(self, client, params: AuthorizationParams) -> str:
         sid = secrets.token_urlsafe(32)
@@ -94,7 +94,7 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
 
     async def exchange_authorization_code(self, client, authorization_code):
         code=authorization_code.code
-        await db("DELETE","mcp_oauth_codes",params={"code_hash":"eq."+digest(code)})
+        await db("DELETE","mcp_oauth_authorization_codes",params={"code_hash":"eq."+digest(code)})
         access=secrets.token_urlsafe(48); refresh=secrets.token_urlsafe(48)
         exp=int(time.time())+3600
         payload={"client_id":client.client_id,"scopes":authorization_code.scopes,"expires_at":exp,"resource":authorization_code.resource}
@@ -231,6 +231,6 @@ def register_amo_routes(mcp):
         if not client: return PlainTextResponse("Unknown OAuth client",status_code=400)
         code=secrets.token_urlsafe(32)
         auth=AuthorizationCode(code=code,scopes=p["scopes"],expires_at=time.time()+180,client_id=p["client_id"],code_challenge=p["code_challenge"],redirect_uri=p["redirect_uri"],redirect_uri_provided_explicitly=p["redirect_uri_provided_explicitly"],resource=p.get("resource"))
-        await db("POST","mcp_oauth_codes",payload={"code_hash":digest(code),"client_id":p["client_id"],"payload":auth.model_dump(mode="json"),"expires_at":datetime.fromtimestamp(auth.expires_at,timezone.utc).isoformat()},prefer="return=minimal")
-        await db("DELETE","mcp_oauth_pending",params={"session_id":"eq."+sid})
+        await db("POST","mcp_oauth_authorization_codes",payload={"code_hash":digest(code),"client_id":p["client_id"],"payload":auth.model_dump(mode="json"),"expires_at":datetime.fromtimestamp(auth.expires_at,timezone.utc).isoformat()},prefer="return=minimal")
+        await db("DELETE","mcp_oauth_pending",params={"transaction_id":"eq."+sid})
         return RedirectResponse(auth.redirect_uri+"?"+urlencode({"code":code,"state":p.get("state") or ""}),status_code=302,headers={"Cache-Control":"no-store"})
