@@ -3,6 +3,8 @@ import json
 import re
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+from oauth_backend import provider, register_amo_routes, amo_access_token, db
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.server.auth.provider import ProviderTokenVerifier
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
@@ -42,44 +44,40 @@ mcp = FastMCP(
 )
 
 
-def get_headers():
-    if not AMOCRM_TOKEN:
-        raise RuntimeError("AMOCRM_TOKEN is not configured")
+async def get_headers():
+    token, domain = await amo_access_token()
     return {
-        "Authorization": f"Bearer {AMOCRM_TOKEN}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
-    }
+    }, f"https://{domain}/api/v4"
 
 
 async def api_get(path: str, params: dict = None) -> dict:
-    if not BASE_URL:
-        raise RuntimeError("AMOCRM_DOMAIN is not configured")
     if not path.startswith("/") or path.startswith("//"):
         raise ValueError("Invalid amoCRM API path")
+    headers, base_url = await get_headers()
     async with httpx.AsyncClient(verify=True, timeout=20.0, follow_redirects=False) as client:
-        resp = await client.get(f"{BASE_URL}{path}", headers=get_headers(), params=params)
+        resp = await client.get(f"{base_url}{path}", headers=headers, params=params)
         resp.raise_for_status()
         return resp.json()
 
 
 async def api_post(path: str, data: dict) -> dict:
-    if not BASE_URL:
-        raise RuntimeError("AMOCRM_DOMAIN is not configured")
     if not path.startswith("/") or path.startswith("//"):
         raise ValueError("Invalid amoCRM API path")
+    headers, base_url = await get_headers()
     async with httpx.AsyncClient(verify=True, timeout=20.0, follow_redirects=False) as client:
-        resp = await client.post(f"{BASE_URL}{path}", headers=get_headers(), json=data)
+        resp = await client.post(f"{base_url}{path}", headers=headers, json=data)
         resp.raise_for_status()
         return resp.json()
 
 
 async def api_patch(path: str, data: dict) -> dict:
-    if not BASE_URL:
-        raise RuntimeError("AMOCRM_DOMAIN is not configured")
     if not path.startswith("/") or path.startswith("//"):
         raise ValueError("Invalid amoCRM API path")
+    headers, base_url = await get_headers()
     async with httpx.AsyncClient(verify=True, timeout=20.0, follow_redirects=False) as client:
-        resp = await client.patch(f"{BASE_URL}{path}", headers=get_headers(), json=data)
+        resp = await client.patch(f"{base_url}{path}", headers=headers, json=data)
         resp.raise_for_status()
         return resp.json()
 
@@ -323,7 +321,7 @@ async def health_check(request: Request) -> JSONResponse:
     })
 
 
-app = mcp.streamable_http_app()
+register_amo_routes(mcp)\napp = mcp.streamable_http_app()
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
