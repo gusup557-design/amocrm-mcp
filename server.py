@@ -4,13 +4,10 @@ import re
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
-from oauth_backend import provider, register_amo_routes, amo_access_token, db
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.server.auth.provider import ProviderTokenVerifier
-from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from oauth_provider import SupabaseOAuthProvider
+from oauth_backend import provider, register_amo_routes, amo_access_token, db
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -25,20 +22,19 @@ for _host in _vercel_hosts:
     if _host:
         _allowed_hosts.extend([_host, f"{_host}:*"])
 
-oauth_provider = SupabaseOAuthProvider()
 auth_settings = AuthSettings(
-    issuer_url="https://amocrm-mcp-ascan-006.vercel.app/",
+    issuer_url="https://amocrm-mcp-ascan-006.vercel.app",
     resource_server_url="https://amocrm-mcp-ascan-006.vercel.app/mcp",
+    required_scopes=["crm"],
     client_registration_options=ClientRegistrationOptions(
         enabled=True,
-        valid_scopes=["crm:read"],
-        default_scopes=["crm:read"],
+        valid_scopes=["crm"],
+        default_scopes=["crm"],
     ),
 )
 mcp = FastMCP(
     "amoCRM",
-    auth_server_provider=oauth_provider,
-    token_verifier=ProviderTokenVerifier(oauth_provider),
+    auth_server_provider=provider,
     auth=auth_settings,
     transport_security=TransportSecuritySettings(allowed_hosts=_allowed_hosts),
 )
@@ -277,17 +273,6 @@ async def get_notes(entity_type: str, entity_id: int) -> str:
         raise ValueError("entity_id must be positive")
     data = await api_get(f"/{entity_type}/{entity_id}/notes")
     return json.dumps(data, ensure_ascii=False, indent=2)
-
-
-@mcp.custom_route("/oauth/login", methods=["GET"])
-async def oauth_login(request: Request):
-    transaction = request.query_params.get("transaction", "")
-    return await oauth_provider.login_page(transaction)
-
-
-@mcp.custom_route("/oauth/approve", methods=["POST"])
-async def oauth_approve(request: Request):
-    return await oauth_provider.approve(request)
 
 
 @mcp.custom_route("/health", methods=["GET"])
