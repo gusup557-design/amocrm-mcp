@@ -181,10 +181,15 @@ def register_amo_routes(mcp):
     async def amo_secrets(request: Request):
         content_type = request.headers.get("content-type", "")
         try:
+            raw_body = await request.body()
             if "application/json" in content_type:
-                body = await request.json()
+                body = json.loads(raw_body.decode("utf-8"))
+            elif "application/x-www-form-urlencoded" in content_type or not content_type:
+                from urllib.parse import parse_qs
+                parsed = parse_qs(raw_body.decode("utf-8"), keep_blank_values=True)
+                body = {key: values[-1] for key, values in parsed.items()}
             else:
-                body = dict(await request.form())
+                return JSONResponse({"error":"unsupported_content_type"},status_code=415)
             if not isinstance(body, dict):
                 return JSONResponse({"error":"invalid_payload"},status_code=400)
             state = str(body.get("state") or "").strip()
