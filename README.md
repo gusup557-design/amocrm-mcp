@@ -16,8 +16,8 @@ MCP (Model Context Protocol) server for amoCRM integration with Claude Desktop a
 ## Prerequisites
 
 - Python 3.10+
-- amoCRM account with API access
-- Long-lived token from amoCRM integration settings
+- amoCRM account with administrator permission to install the integration
+- Supabase project and Vercel project configured with server-side secrets
 
 ## Installation
 
@@ -29,7 +29,7 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in `AMOCRM_DOMAIN` and `AMOCRM_TOKEN`. Never commit real credentials.
+For local stdio mode, configure `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `MCP_TOKEN_ENCRYPTION_KEY`. For production, set them as sensitive Vercel environment variables. Connect the CRM through `/connect`; do not use legacy long-lived API tokens.
 
 ## Claude Desktop Setup
 
@@ -59,15 +59,17 @@ The `server.py` ASGI application is used by Vercel's Python runtime. The origina
 
 ### Vercel environment variables
 
-Required for CRM API calls:
-- `AMOCRM_DOMAIN` — amoCRM subdomain, without protocol.
-- `AMOCRM_TOKEN` — long-lived token. Do not commit it.
-
-Optional Supabase connectivity check:
+Required:
 - `SUPABASE_URL`
-- `SUPABASE_SECRET_KEY` (preferred) or `SUPABASE_SERVICE_ROLE_KEY` (legacy)
+- `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`
+- `MCP_TOKEN_ENCRYPTION_KEY` — 64-character hex AES-256-GCM key
+- `MCP_ADMIN_PASSWORD` — owner password for OAuth consent
 
-Supabase keys are server-only. The health endpoint checks access to the existing `amocrm_connections` table without returning any CRM records or credentials.
+Optional:
+- `AMOCRM_REDIRECT_URI` — defaults to the production callback
+- `MCP_ALLOW_WRITE` — defaults to `false`; only set to `true` to enable CRM write tools
+
+Supabase and encryption keys are server-only. The health endpoint checks connectivity without returning CRM records or credentials.
 
 ### Security notes
 
