@@ -129,6 +129,9 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
         if p.get("expires_at",0) <= int(time.time()): return None
         return AccessToken(token=token,client_id=rows[0]["client_id"],scopes=p["scopes"],expires_at=p["expires_at"])
 
+    async def verify_token(self, token):
+        return await self.load_access_token(token)
+
     async def revoke_token(self, token):
         token_value = token.token
         await db("PATCH","mcp_oauth_tokens",params={"token_hash":"eq."+digest(token_value)},payload={"revoked_at":datetime.now(timezone.utc).isoformat()},prefer="return=minimal")
@@ -163,7 +166,7 @@ async def amo_access_token():
     },prefer="return=minimal")
     return tok["access_token"],row["base_domain"]
 
-async def register_amo_routes(mcp):
+def register_amo_routes(mcp):
     @mcp.custom_route("/connect",methods=["GET"])
     async def connect(request: Request):
         state=secrets.token_urlsafe(32)
