@@ -26,6 +26,7 @@ auth_settings = AuthSettings(
     issuer_url="https://amocrm-mcp-ascan-006.vercel.app",
     resource_server_url="https://amocrm-mcp-ascan-006.vercel.app/mcp",
     required_scopes=["crm"],
+    validate_token_resource=True,
     client_registration_options=ClientRegistrationOptions(
         enabled=True,
         valid_scopes=["crm"],
