@@ -114,10 +114,10 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
     async def exchange_refresh_token(self, client, refresh_token, scopes):
         await db("PATCH","mcp_oauth_tokens",params={"token_hash":"eq."+digest(refresh_token.token)},payload={"revoked_at":datetime.now(timezone.utc).isoformat()},prefer="return=minimal")
         access=secrets.token_urlsafe(48); refresh=secrets.token_urlsafe(48); exp=int(time.time())+3600
-        payload={"client_id":client.client_id,"scopes":scopes,"expires_at":exp}
+        payload={"client_id":client.client_id,"scopes":scopes,"expires_at":exp,"resource":refresh_token.resource}
         await db("POST","mcp_oauth_tokens",payload=[
             {"token_hash":digest(access),"client_id":client.client_id,"token_type":"access","payload":payload,"expires_at":datetime.fromtimestamp(exp,timezone.utc).isoformat()},
-            {"token_hash":digest(refresh),"client_id":client.client_id,"token_type":"refresh","payload":{"client_id":client.client_id,"scopes":scopes},"expires_at":(datetime.now(timezone.utc)+timedelta(days=30)).isoformat()}
+            {"token_hash":digest(refresh),"client_id":client.client_id,"token_type":"refresh","payload":{"client_id":client.client_id,"scopes":scopes,"resource":refresh_token.resource},"expires_at":(datetime.now(timezone.utc)+timedelta(days=30)).isoformat()}
         ],prefer="return=minimal")
         return OAuthToken(access_token=access,refresh_token=refresh,expires_in=3600,scope=" ".join(scopes))
 
