@@ -45,6 +45,10 @@ class UpstreamToolPreservationTests(unittest.TestCase):
         self.assertIn("app = mcp.streamable_http_app(", self.source)
         self.assertIn("TransportSecuritySettings", self.source)
 
+    def test_supabase_health_probe_uses_existing_connections_table(self):
+        self.assertIn("amocrm_connections?select=account_id", self.source)
+        self.assertIn("SUPABASE_SERVICE_ROLE_KEY", self.source)
+
     def test_entity_note_paths_are_allowlisted(self):
         self.assertGreaterEqual(self.source.count('entity_type not in {"leads", "contacts", "companies"}'), 2)
 
