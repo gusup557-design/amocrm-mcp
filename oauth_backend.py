@@ -61,7 +61,7 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
         rows = await db("GET", "mcp_oauth_clients", params={"client_id": "eq."+client_id, "select":"*","limit":"1"})
         if not rows: return None
         row = rows[0]
-        meta = row["client_metadata"]
+        meta = row["client_info"]
         if isinstance(meta, str): meta = json.loads(meta)
         if row.get("client_secret_enc"):
             meta["client_secret"] = decrypt(row["client_secret_enc"])
@@ -82,11 +82,11 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
             "redirect_uri_provided_explicitly": params.redirect_uri_provided_explicitly,
             "resource": params.resource, "client_id": client.client_id,
         }
-        await db("POST","mcp_oauth_pending",payload={"session_id":sid,"client_id":client.client_id,"payload":payload,"expires_at":(datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat()},prefer="return=minimal")
+        await db("POST","mcp_oauth_pending",payload={"transaction_id":sid,"client_id":client.client_id,"payload":payload,"expires_at":(datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat()},prefer="return=minimal")
         return BASE + "/oauth/consent?" + urlencode({"session":sid})
 
     async def load_authorization_code(self, client, code):
-        rows=await db("GET","mcp_oauth_codes",params={"code_hash":"eq."+digest(code),"client_id":"eq."+str(client.client_id),"select":"*","limit":"1"})
+        rows=await db("GET","mcp_oauth_authorization_codes",params={"code_hash":"eq."+digest(code),"client_id":"eq."+str(client.client_id),"select":"*","limit":"1"})
         if not rows: return None
         p=rows[0]["payload"]
         if isinstance(p,str): p=json.loads(p)
@@ -214,7 +214,7 @@ def register_amo_routes(mcp):
     async def consent(request: Request):
         sid=request.query_params.get("session") or (await request.form()).get("session")
         if not sid: return PlainTextResponse("Missing session",status_code=400)
-        rows=await db("GET","mcp_oauth_pending",params={"session_id":"eq."+str(sid),"select":"*","limit":"1"})
+        rows=await db("GET","mcp_oauth_pending",params={"transaction_id":"eq."+str(sid),"select":"*","limit":"1"})
         if not rows or datetime.fromisoformat(rows[0]["expires_at"].replace("Z","+00:00")) < datetime.now(timezone.utc):
             return PlainTextResponse("Authorization session expired",status_code=400)
         if request.method=="GET":
