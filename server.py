@@ -1,17 +1,22 @@
 import os
 import json
 import httpx
+import re
 from mcp.server.fastmcp import FastMCP
 
 # Конфигурация
-AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "")
-AMOCRM_TOKEN = os.environ.get("AMOCRM_TOKEN", "")
-BASE_URL = f"https://{AMOCRM_DOMAIN}.amocrm.ru/api/v4"
+AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
+AMOCRM_TOKEN = os.environ.get("AMOCRM_TOKEN", "").strip()
+if AMOCRM_DOMAIN and not re.fullmatch(r"[A-Za-z0-9-]+", AMOCRM_DOMAIN):
+    raise RuntimeError("AMOCRM_DOMAIN must be an amoCRM subdomain without protocol or path")
+BASE_URL = f"https://{AMOCRM_DOMAIN}.amocrm.ru/api/v4" if AMOCRM_DOMAIN else ""
 
 mcp = FastMCP("amoCRM")
 
 
 def get_headers():
+    if not AMOCRM_TOKEN:
+        raise RuntimeError("AMOCRM_TOKEN is not configured")
     return {
         "Authorization": f"Bearer {AMOCRM_TOKEN}",
         "Content-Type": "application/json",
@@ -19,21 +24,33 @@ def get_headers():
 
 
 async def api_get(path: str, params: dict = None) -> dict:
-    async with httpx.AsyncClient(verify=False) as client:
+    if not BASE_URL:
+        raise RuntimeError("AMOCRM_DOMAIN is not configured")
+    if not path.startswith("/") or path.startswith("//"):
+        raise ValueError("Invalid amoCRM API path")
+    async with httpx.AsyncClient(verify=True, timeout=20.0, follow_redirects=False) as client:
         resp = await client.get(f"{BASE_URL}{path}", headers=get_headers(), params=params)
         resp.raise_for_status()
         return resp.json()
 
 
 async def api_post(path: str, data: dict) -> dict:
-    async with httpx.AsyncClient(verify=False) as client:
+    if not BASE_URL:
+        raise RuntimeError("AMOCRM_DOMAIN is not configured")
+    if not path.startswith("/") or path.startswith("//"):
+        raise ValueError("Invalid amoCRM API path")
+    async with httpx.AsyncClient(verify=True, timeout=20.0, follow_redirects=False) as client:
         resp = await client.post(f"{BASE_URL}{path}", headers=get_headers(), json=data)
         resp.raise_for_status()
         return resp.json()
 
 
 async def api_patch(path: str, data: dict) -> dict:
-    async with httpx.AsyncClient(verify=False) as client:
+    if not BASE_URL:
+        raise RuntimeError("AMOCRM_DOMAIN is not configured")
+    if not path.startswith("/") or path.startswith("//"):
+        raise ValueError("Invalid amoCRM API path")
+    async with httpx.AsyncClient(verify=True, timeout=20.0, follow_redirects=False) as client:
         resp = await client.patch(f"{BASE_URL}{path}", headers=get_headers(), json=data)
         resp.raise_for_status()
         return resp.json()
@@ -209,6 +226,8 @@ async def get_users() -> str:
 @mcp.tool()
 async def add_note(entity_type: str, entity_id: int, text: str) -> str:
     """Добавить примечание к сущности. entity_type — leads/contacts/companies, entity_id — ID сущности, text — текст примечания."""
+    if entity_type not in {"leads", "contacts", "companies"}:
+        raise ValueError("entity_type must be leads, contacts, or companies")
     note = {"note_type": "common", "params": {"text": text}}
     data = await api_post(f"/{entity_type}/{entity_id}/notes", [note])
     return json.dumps(data, ensure_ascii=False, indent=2)
@@ -217,6 +236,8 @@ async def add_note(entity_type: str, entity_id: int, text: str) -> str:
 @mcp.tool()
 async def get_notes(entity_type: str, entity_id: int) -> str:
     """Получить примечания сущности. entity_type — leads/contacts/companies, entity_id — ID."""
+    if entity_type not in {"leads", "contacts", "companies"}:
+        raise ValueError("entity_type must be leads, contacts, or companies")
     data = await api_get(f"/{entity_type}/{entity_id}/notes")
     return json.dumps(data, ensure_ascii=False, indent=2)
 
