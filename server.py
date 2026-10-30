@@ -280,6 +280,155 @@ async def get_notes(entity_type: str, entity_id: int) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+# ===================== РАСШИРЕННОЕ УПРАВЛЕНИЕ CRM =====================
+
+def _dump(data):
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+def _json_arg(value: str, expected_type):
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Передан некорректный JSON") from exc
+    if not isinstance(parsed, expected_type):
+        raise ValueError("JSON имеет неверный тип")
+    return parsed
+
+
+@mcp.tool()
+async def get_salesbots(page: int = 1, limit: int = 100) -> str:
+    """Получить список Salesbot и состояние активности. Только чтение."""
+    return _dump(await api_get("/bots", {"page": page, "limit": min(max(limit, 1), 250)}))
+
+
+@mcp.tool()
+async def get_salesbot(bot_id: int) -> str:
+    """Получить конфигурацию Salesbot по ID. Только чтение."""
+    if bot_id <= 0:
+        raise ValueError("bot_id must be positive")
+    return _dump(await api_get(f"/bots/{bot_id}"))
+
+
+@mcp.tool()
+async def get_talks(page: int = 1, limit: int = 100, status: str = "", contact_id: int = 0, origin: str = "") -> str:
+    """Получить список бесед/чатов и их статусы. Содержимое сообщений может требовать отдельного Chat API."""
+    params = {"page": page, "limit": min(max(limit, 1), 250)}
+    if status:
+        params["status"] = status
+    if contact_id > 0:
+        params["contact_id"] = contact_id
+    if origin:
+        params["origin"] = origin
+    return _dump(await api_get("/talks", params))
+
+
+@mcp.tool()
+async def get_talk(talk_id: int) -> str:
+    """Получить сведения о конкретной беседе, контакте и связанной сделке."""
+    if talk_id <= 0:
+        raise ValueError("talk_id must be positive")
+    return _dump(await api_get(f"/talks/{talk_id}"))
+
+
+@mcp.tool()
+async def get_custom_fields(entity_type: str) -> str:
+    """Получить пользовательские поля leads, contacts или companies."""
+    if entity_type not in {"leads", "contacts", "companies"}:
+        raise ValueError("entity_type must be leads, contacts, or companies")
+    return _dump(await api_get(f"/{entity_type}/custom_fields", {"limit": 250}))
+
+
+@mcp.tool()
+async def get_webhooks() -> str:
+    """Получить список установленных вебхуков. Требуются права администратора."""
+    return _dump(await api_get("/webhooks"))
+
+
+@mcp.tool()
+async def get_sources() -> str:
+    """Получить источники лидов и подключённые каналы аккаунта. Требуются права администратора."""
+    return _dump(await api_get("/sources"))
+
+
+@mcp.tool()
+async def get_amma_agents(page: int = 1, limit: int = 50) -> str:
+    """Получить список ИИ-агентов Аммы, созданных этой интеграцией. Нужен отдельный scope «Амма» и доступность Аммы на тарифе."""
+    return _dump(await api_get("/amma/agents", {"page": page, "limit": min(max(limit, 1), 50)}))
+
+
+@mcp.tool()
+async def create_pipeline(name: str, statuses_json: str = "[]") -> str:
+    """Создать воронку с этапами. Изменяет CRM; требует MCP_ALLOW_WRITE=true и прав администратора. statuses_json — JSON-массив объектов этапов."""
+    statuses = _json_arg(statuses_json, list)
+    payload = {"name": name}
+    if statuses:
+        payload["_embedded"] = {"statuses": statuses}
+    return _dump(await api_post("/leads/pipelines", [payload]))
+
+
+@mcp.tool()
+async def update_pipeline(pipeline_id: int, name: str = "", is_main: bool = False) -> str:
+    """Изменить название или основной статус воронки. Изменяет CRM; требует MCP_ALLOW_WRITE=true и прав администратора."""
+    if pipeline_id <= 0:
+        raise ValueError("pipeline_id must be positive")
+    item = {"id": pipeline_id}
+    if name:
+        item["name"] = name
+    if is_main:
+        item["is_main"] = True
+    if len(item) == 1:
+        raise ValueError("Укажи новое name или is_main=true")
+    return _dump(await api_patch("/leads/pipelines", [item]))
+
+
+@mcp.tool()
+async def add_call_record(phone: str, duration: int, direction: str, source: str, link: str = "", call_result: str = "", call_status: int = 0, responsible_user_id: int = 0) -> str:
+    """Записать завершённый входящий/исходящий звонок в карточку контакта по номеру. Это не инициирует реальный звонок; требует MCP_ALLOW_WRITE=true."""
+    if direction not in {"inbound", "outbound"}:
+        raise ValueError("direction must be inbound or outbound")
+    if duration < 0 or not phone.strip() or not source.strip():
+        raise ValueError("phone/source are required and duration cannot be negative")
+    call = {"phone": phone, "duration": duration, "direction": direction, "source": source}
+    if link:
+        call["link"] = link
+    if call_result:
+        call["call_result"] = call_result
+    if call_status:
+        if call_status not in range(1, 8):
+            raise ValueError("call_status must be from 1 to 7")
+        call["call_status"] = call_status
+    if responsible_user_id > 0:
+        call["responsible_user_id"] = responsible_user_id
+    return _dump(await api_post("/calls", [call]))
+
+
+@mcp.tool()
+async def create_webhook(destination: str, events_json: str) -> str:
+    """Подписать amoCRM на события и отправлять их на HTTPS URL. Изменяет настройки интеграции; требует MCP_ALLOW_WRITE=true и прав администратора."""
+    from urllib.parse import urlparse
+    parsed = urlparse(destination)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("destination must be a valid HTTPS URL")
+    events = _json_arg(events_json, list)
+    if not events or not all(isinstance(x, str) for x in events):
+        raise ValueError("events_json must be a non-empty JSON array of strings")
+    return _dump(await api_post("/webhooks", {"destination": destination, "settings": events}))
+
+
+@mcp.tool()
+async def create_amma_agent(name: str, description: str, system_prompt: str, ai_instructions: str = "", model_size: str = "M") -> str:
+    """Создать ИИ-агента Аммы, подключённого к этому MCP. Нужен scope «Амма» (только технический аккаунт amoCRM), доступность Аммы и MCP_ALLOW_WRITE=true."""
+    if model_size not in {"S", "M", "L"}:
+        raise ValueError("model_size must be S, M, or L")
+    agent = {
+        "name": name, "description": description, "system_prompt": system_prompt,
+        "ai_instructions": ai_instructions, "model_size": model_size,
+        "mcp": {"url": "https://amocrm-mcp-ascan-006.vercel.app/mcp", "transport": "streamable-http"},
+        "is_active": True,
+    }
+    return _dump(await api_post("/amma/agents", [agent]))
+
+
 @mcp.custom_route("/health", methods=["GET"])
 async def health_check(request: Request) -> JSONResponse:
     """Non-sensitive liveness/readiness check; never returns credentials or CRM records."""
@@ -313,7 +462,7 @@ async def health_check(request: Request) -> JSONResponse:
     return JSONResponse({
         "status": "ok",
         "service": "amoCRM MCP",
-        "tools": 17,
+        "tools": 29,
         "supabase": supabase_status,
         "amoCRM": amo_status,
     })
