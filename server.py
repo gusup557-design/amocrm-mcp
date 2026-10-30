@@ -83,6 +83,20 @@ async def api_patch(path: str, data: dict) -> dict:
         return resp.json()
 
 
+async def api_delete(path: str):
+    if os.environ.get("MCP_ALLOW_WRITE", "false").lower() != "true":
+        raise PermissionError("CRM write operations are disabled by default")
+    if not path.startswith("/") or path.startswith("//"):
+        raise ValueError("Invalid amoCRM API path")
+    headers, base_url = await get_headers()
+    async with httpx.AsyncClient(verify=True, timeout=20.0, follow_redirects=False) as client:
+        resp = await client.delete(f"{base_url}{path}", headers=headers)
+        resp.raise_for_status()
+        if resp.status_code == 204 or not resp.content:
+            return {"status":"deleted"}
+        return resp.json()
+
+
 # ===================== АККАУНТ =====================
 
 @mcp.tool()
@@ -429,6 +443,102 @@ async def create_amma_agent(name: str, description: str, system_prompt: str, ai_
     return _dump(await api_post("/amma/agents", [agent]))
 
 
+@mcp.tool()
+async def get_events(page: int = 1, limit: int = 100, entity: str = "", entity_id: int = 0, created_after: int = 0) -> str:
+    """Получить историю событий CRM: создание и изменения сущностей. Поддерживает фильтр по типу сущности, ID и времени."""
+    params = {"page": page, "limit": min(max(limit, 1), 100)}
+    if entity:
+        if entity not in {"lead", "contact", "company", "customer", "task"} and not re.fullmatch(r"catalog_\d+", entity):
+            raise ValueError("Unsupported entity filter")
+        params["filter[entity]"] = entity
+    if entity_id > 0:
+        if not entity:
+            raise ValueError("entity is required when entity_id is provided")
+        params["filter[entity_id]"] = entity_id
+    if created_after > 0:
+        params["filter[created_at]"] = created_after
+    return _dump(await api_get("/events", params))
+
+
+@mcp.tool()
+async def get_widgets(page: int = 1, limit: int = 100) -> str:
+    """Получить список доступных, загруженных и установленных виджетов аккаунта."""
+    return _dump(await api_get("/widgets", {"page": page, "limit": min(max(limit, 1), 250)}))
+
+
+@mcp.tool()
+async def get_catalogs(page: int = 1, limit: int = 100) -> str:
+    """Получить каталоги/списки amoCRM, доступные текущему пользователю."""
+    return _dump(await api_get("/catalogs", {"page": page, "limit": min(max(limit, 1), 250)}))
+
+
+@mcp.tool()
+async def get_catalog_elements(catalog_id: int, page: int = 1, limit: int = 100, query: str = "") -> str:
+    """Получить элементы указанного каталога, с поиском по заполненным полям."""
+    if catalog_id <= 0:
+        raise ValueError("catalog_id must be positive")
+    params = {"page": page, "limit": min(max(limit, 1), 250)}
+    if query:
+        params["query"] = query
+    return _dump(await api_get(f"/catalogs/{catalog_id}/elements", params))
+
+
+@mcp.tool()
+async def get_tags(entity_type: str = "leads", page: int = 1, limit: int = 100, query: str = "") -> str:
+    """Получить теги сделок, контактов, компаний или покупателей."""
+    if entity_type not in {"leads", "contacts", "companies", "customers"}:
+        raise ValueError("Unsupported entity_type")
+    params = {"page": page, "limit": min(max(limit, 1), 250)}
+    if query:
+        params["query"] = query
+    return _dump(await api_get(f"/{entity_type}/tags", params))
+
+
+@mcp.tool()
+async def get_chat_templates(page: int = 1, limit: int = 50, with_reviews: bool = False) -> str:
+    """Получить шаблоны сообщений чатов, включая статусы модерации WhatsApp при необходимости."""
+    params = {"page": page, "limit": min(max(limit, 1), 50)}
+    if with_reviews:
+        params["with"] = "reviews"
+    return _dump(await api_get("/chats/templates", params))
+
+
+@mcp.tool()
+async def get_amma_agent(agent_id: str) -> str:
+    """Получить настройки агента Аммы по UUID, включая system_prompt и ai_instructions. Требуется scope Амма."""
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", agent_id):
+        raise ValueError("agent_id must be a UUID")
+    return _dump(await api_get(f"/amma/agents/{agent_id}"))
+
+
+@mcp.tool()
+async def update_amma_agent(agent_id: str, patch_json: str) -> str:
+    """Обновить агента Аммы (имя, промпты, модель, MCP endpoint, активность). Требуется scope Амма и MCP_ALLOW_WRITE=true."""
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", agent_id):
+        raise ValueError("agent_id must be a UUID")
+    patch = _json_arg(patch_json, dict)
+    allowed = {"name", "description", "ai_instructions", "system_prompt", "avatar", "model_size", "mcp", "is_active"}
+    if not patch or set(patch) - allowed:
+        raise ValueError("patch_json contains no fields or unsupported fields")
+    return _dump(await api_patch(f"/amma/agents/{agent_id}", patch))
+
+
+@mcp.tool()
+async def delete_amma_agent(agent_id: str) -> str:
+    """Удалить агента Аммы, созданного этой интеграцией. Необратимо; требуется scope Амма и MCP_ALLOW_WRITE=true."""
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", agent_id):
+        raise ValueError("agent_id must be a UUID")
+    return _dump(await api_delete(f"/amma/agents/{agent_id}"))
+
+
+@mcp.tool()
+async def delete_pipeline(pipeline_id: int) -> str:
+    """Удалить пустую воронку. Необратимо; amoCRM запрещает удалять последнюю воронку и воронку со сделками."""
+    if pipeline_id <= 0:
+        raise ValueError("pipeline_id must be positive")
+    return _dump(await api_delete(f"/leads/pipelines/{pipeline_id}"))
+
+
 @mcp.custom_route("/health", methods=["GET"])
 async def health_check(request: Request) -> JSONResponse:
     """Non-sensitive liveness/readiness check; never returns credentials or CRM records."""
@@ -462,7 +572,7 @@ async def health_check(request: Request) -> JSONResponse:
     return JSONResponse({
         "status": "ok",
         "service": "amoCRM MCP",
-        "tools": 30,
+        "tools": 40,
         "supabase": supabase_status,
         "amoCRM": amo_status,
     })
