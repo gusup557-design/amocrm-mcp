@@ -314,7 +314,8 @@ async def health_check(request: Request) -> JSONResponse:
     })
 
 
-register_amo_routes(mcp)\napp = mcp.streamable_http_app()
+register_amo_routes(mcp)
+app = mcp.streamable_http_app()
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
