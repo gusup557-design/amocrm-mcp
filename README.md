@@ -1,6 +1,6 @@
 # amoCRM MCP Server
 
-MCP (Model Context Protocol) server for amoCRM integration with Claude Desktop and other AI assistants.
+MCP (Model Context Protocol) server for amoCRM integration with ChatGPT and other MCP-compatible AI clients.
 
 ## Features
 
@@ -12,6 +12,15 @@ MCP (Model Context Protocol) server for amoCRM integration with Claude Desktop a
 - **Users** -- list account users
 - **Notes** -- add and read notes on any entity
 - **Account** -- get account info
+- **Salesbot** -- inspect Salesbot configurations
+- **Chats** -- inspect talks and chat templates
+- **Custom fields** -- inspect lead/contact/company fields
+- **Events** -- read CRM audit events
+- **Sources and webhooks** -- inspect channels and webhook subscriptions
+- **Calls** -- add completed call records to CRM cards (does not initiate calls)
+- **Catalogs and tags** -- inspect catalog items and entity tags
+- **Widgets** -- inspect installed and available widgets
+- **Amma AI agents** -- list, inspect, create, update and delete integration-owned agents when the account and integration have the Amma scope
 
 ## Prerequisites
 
@@ -50,12 +59,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes the original 17 tools over MCP Streamable HTTP at:
+This repository exposes 40 amoCRM tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 40 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -90,3 +99,15 @@ Production MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - amoCRM credentials and OAuth tokens are encrypted with AES-256-GCM using `MCP_TOKEN_ENCRYPTION_KEY`; MCP bearer tokens are stored as SHA-256 hashes.
 - `MCP_ALLOW_WRITE` defaults to `false`. Original write tools remain present, but create/update/note operations are blocked unless the owner deliberately sets this variable to `true`.
 - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` must be available to the Vercel production runtime.
+
+## Extended CRM coverage and boundaries
+
+The extended toolset covers CRM account data, leads, contacts, companies, tasks, pipelines, pipeline stages, custom fields, tags, catalogs, catalog elements, events, sources, webhooks, widgets, Salesbot, talks, chat templates, call logging, and Amma agent lifecycle management.
+
+Important platform boundaries:
+- The amoCRM REST Calls API records completed calls against CRM cards. It does **not** place or answer telephone calls. Actual telephony requires a provider/widget or a separate telephony API integration.
+- AI voice calls require a voice-agent/telephony provider (for example ElevenLabs plus a supported phone/SIP carrier) and separate credentials, phone-number provisioning, and consent/compliance configuration.
+- amoCRM Chat API uses its own channel registration, scope IDs, and HMAC signatures. It is separate from the CRM OAuth bearer token; message history and sending require a separately registered chat channel.
+- The public Amma Agents API manages agents connected to an MCP endpoint. It does not document a general endpoint to submit arbitrary prompts to amoCRM's internal Amma model and fetch its generated answer. The API has account availability and integration-scope requirements, and a maximum of two agents created by one integration and ten per account.
+- The external-integration OAuth button documents `crm` and `notifications` scopes. Amma's separate scope must be granted through the appropriate amoCRM integration setup; adding an undocumented scope to the button is not valid.
+- All CRM write tools remain disabled unless `MCP_ALLOW_WRITE=true` is deliberately enabled. Deleting pipelines, agents, widgets, webhooks or fields can be destructive. Field deletion also removes field values.
