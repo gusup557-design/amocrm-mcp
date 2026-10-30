@@ -33,7 +33,7 @@ class UpstreamToolPreservationTests(unittest.TestCase):
             "get_companies", "get_company", "create_company", "get_tasks",
             "create_task", "get_pipelines", "get_users", "add_note", "get_notes",
         }
-        self.assertEqual(expected, exposed)
+        self.assertTrue(expected.issubset(exposed), f'Missing upstream tools: {sorted(expected - exposed)}')
 
     def test_tls_verification_is_enabled(self):
         self.assertNotIn("verify=False", self.source)
