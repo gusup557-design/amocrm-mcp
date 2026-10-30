@@ -41,6 +41,10 @@ class UpstreamToolPreservationTests(unittest.TestCase):
         self.assertIn("async def api_post(", self.source)
         self.assertIn("async def api_patch(", self.source)
 
+    def test_vercel_exposes_streamable_http_app(self):
+        self.assertIn("app = mcp.streamable_http_app(", self.source)
+        self.assertIn("TransportSecuritySettings", self.source)
+
     def test_entity_note_paths_are_allowlisted(self):
         self.assertGreaterEqual(self.source.count('entity_type not in {"leads", "contacts", "companies"}'), 2)
 
