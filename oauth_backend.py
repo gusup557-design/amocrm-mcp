@@ -105,7 +105,7 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
         return OAuthToken(access_token=access,refresh_token=refresh,expires_in=3600,scope=" ".join(authorization_code.scopes))
 
     async def load_refresh_token(self, client, token):
-        rows=await db("GET","mcp_oauth_tokens",params={"token_hash":"eq."+digest(token),"token_type":"eq.refresh","revoked_at":"is.null","select":"*","limit":"1"})
+        rows=await db("GET","mcp_oauth_tokens",params={"token_hash":"eq."+digest(token),"token_type":"eq.refresh","revoked_at":"is.null","expires_at":"gt."+datetime.now(timezone.utc).isoformat(),"select":"*","limit":"1"})
         if not rows: return None
         p=rows[0]["payload"]
         if isinstance(p,str): p=json.loads(p)
