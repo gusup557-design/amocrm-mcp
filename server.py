@@ -4,6 +4,8 @@ import httpx
 import re
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -253,6 +255,12 @@ async def get_notes(entity_type: str, entity_id: int) -> str:
         raise ValueError("entity_type must be leads, contacts, or companies")
     data = await api_get(f"/{entity_type}/{entity_id}/notes")
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request: Request) -> JSONResponse:
+    """Public liveness check; does not expose credentials or CRM records."""
+    return JSONResponse({"status": "ok", "service": "amoCRM MCP", "tools": 17})
 
 
 # Vercel Python runtime entrypoint: Streamable HTTP at /mcp.
