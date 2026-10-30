@@ -80,7 +80,7 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
             "state": params.state, "scopes": params.scopes or ["crm"],
             "code_challenge": params.code_challenge, "redirect_uri": str(params.redirect_uri),
             "redirect_uri_provided_explicitly": params.redirect_uri_provided_explicitly,
-            "resource": params.resource, "client_id": client.client_id,
+            "resource": expected_resource, "client_id": client.client_id,
         }
         await db("POST","mcp_oauth_pending",payload={"transaction_id":sid,"client_id":client.client_id,"payload":payload,"expires_at":(datetime.now(timezone.utc)+timedelta(minutes=10)).isoformat()},prefer="return=minimal")
         return BASE + "/oauth/consent?" + urlencode({"session":sid})
@@ -100,7 +100,7 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
         payload={"client_id":client.client_id,"scopes":authorization_code.scopes,"expires_at":exp,"resource":authorization_code.resource}
         await db("POST","mcp_oauth_tokens",payload=[
             {"token_hash":digest(access),"client_id":client.client_id,"token_type":"access","payload":payload,"expires_at":datetime.fromtimestamp(exp,timezone.utc).isoformat()},
-            {"token_hash":digest(refresh),"client_id":client.client_id,"token_type":"refresh","payload":{"client_id":client.client_id,"scopes":authorization_code.scopes},"expires_at":(datetime.now(timezone.utc)+timedelta(days=30)).isoformat()}
+            {"token_hash":digest(refresh),"client_id":client.client_id,"token_type":"refresh","payload":{"client_id":client.client_id,"scopes":authorization_code.scopes,"resource":authorization_code.resource},"expires_at":(datetime.now(timezone.utc)+timedelta(days=30)).isoformat()}
         ],prefer="return=minimal")
         return OAuthToken(access_token=access,refresh_token=refresh,expires_in=3600,scope=" ".join(authorization_code.scopes))
 
@@ -109,7 +109,7 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
         if not rows: return None
         p=rows[0]["payload"]
         if isinstance(p,str): p=json.loads(p)
-        return RefreshToken(token=token,client_id=rows[0]["client_id"],scopes=p["scopes"])
+        return RefreshToken(token=token,client_id=rows[0]["client_id"],scopes=p["scopes"],resource=p.get("resource"))
 
     async def exchange_refresh_token(self, client, refresh_token, scopes):
         await db("PATCH","mcp_oauth_tokens",params={"token_hash":"eq."+digest(refresh_token.token)},payload={"revoked_at":datetime.now(timezone.utc).isoformat()},prefer="return=minimal")
@@ -127,7 +127,7 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
         p=rows[0]["payload"]
         if isinstance(p,str): p=json.loads(p)
         if p.get("expires_at",0) <= int(time.time()): return None
-        return AccessToken(token=token,client_id=rows[0]["client_id"],scopes=p["scopes"],expires_at=p["expires_at"])
+        return AccessToken(token=token,client_id=rows[0]["client_id"],scopes=p["scopes"],expires_at=p["expires_at"],resource=p.get("resource"))
 
     async def verify_token(self, token):
         return await self.load_access_token(token)
