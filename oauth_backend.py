@@ -178,41 +178,41 @@ def register_amo_routes(mcp):
         return HTMLResponse(html,headers={"Cache-Control":"no-store"})
 
     @mcp.custom_route("/oauth/secrets",methods=["POST"])
-        async def amo_secrets(request: Request):
-            content_type = request.headers.get("content-type", "")
-            try:
-                if "application/json" in content_type:
-                    body = await request.json()
-                else:
-                    body = dict(await request.form())
-                if not isinstance(body, dict):
-                    return JSONResponse({"error":"invalid_payload"},status_code=400)
-                state = str(body.get("state") or "").strip()
-                cid = str(body.get("client_id") or "").strip()
-                secret = str(body.get("client_secret") or "").strip()
-                import logging
-                logging.getLogger("amocrm.oauth").info(
-                    "amoCRM secrets webhook: content_type=%s fields=%s state_present=%s client_id_present=%s secret_present=%s",
-                    content_type.split(";")[0], sorted(body.keys()), bool(state), bool(cid), bool(secret)
-                )
-                if not state or not cid or not secret:
-                    return JSONResponse({"error":"missing_required_fields"},status_code=400)
-                rows = await db("GET","amocrm_oauth_pending",params={
-                    "state":"eq."+state, "select":"state,expires_at", "limit":"1"
-                })
-                if not rows:
-                    return JSONResponse({"error":"unknown_state"},status_code=400)
-                expiry = datetime.fromisoformat(rows[0]["expires_at"].replace("Z","+00:00"))
-                if expiry < datetime.now(timezone.utc):
-                    return JSONResponse({"error":"expired_state"},status_code=400)
-                await db("PATCH","amocrm_oauth_pending",params={"state":"eq."+state},
-                         payload={"client_id":cid,"client_secret_enc":encrypt(secret)},
-                         prefer="return=minimal")
-                return JSONResponse({"status":"stored"},status_code=200)
-            except Exception:
-                import logging
-                logging.getLogger("amocrm.oauth").exception("amoCRM secrets webhook failed")
-                return JSONResponse({"error":"secrets_webhook_failed"},status_code=500)
+    async def amo_secrets(request: Request):
+        content_type = request.headers.get("content-type", "")
+        try:
+            if "application/json" in content_type:
+                body = await request.json()
+            else:
+                body = dict(await request.form())
+            if not isinstance(body, dict):
+                return JSONResponse({"error":"invalid_payload"},status_code=400)
+            state = str(body.get("state") or "").strip()
+            cid = str(body.get("client_id") or "").strip()
+            secret = str(body.get("client_secret") or "").strip()
+            import logging
+            logging.getLogger("amocrm.oauth").info(
+                "amoCRM secrets webhook: content_type=%s fields=%s state_present=%s client_id_present=%s secret_present=%s",
+                content_type.split(";")[0], sorted(body.keys()), bool(state), bool(cid), bool(secret)
+            )
+            if not state or not cid or not secret:
+                return JSONResponse({"error":"missing_required_fields"},status_code=400)
+            rows = await db("GET","amocrm_oauth_pending",params={
+                "state":"eq."+state, "select":"state,expires_at", "limit":"1"
+            })
+            if not rows:
+                return JSONResponse({"error":"unknown_state"},status_code=400)
+            expiry = datetime.fromisoformat(rows[0]["expires_at"].replace("Z","+00:00"))
+            if expiry < datetime.now(timezone.utc):
+                return JSONResponse({"error":"expired_state"},status_code=400)
+            await db("PATCH","amocrm_oauth_pending",params={"state":"eq."+state},
+                     payload={"client_id":cid,"client_secret_enc":encrypt(secret)},
+                     prefer="return=minimal")
+            return JSONResponse({"status":"stored"},status_code=200)
+        except Exception:
+            import logging
+            logging.getLogger("amocrm.oauth").exception("amoCRM secrets webhook failed")
+            return JSONResponse({"error":"secrets_webhook_failed"},status_code=500)
 
     @mcp.custom_route("/oauth/callback",methods=["GET"])
     async def amo_callback(request: Request):
