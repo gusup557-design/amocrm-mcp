@@ -169,7 +169,7 @@ async def amo_access_token():
 def register_amo_routes(mcp):
     @mcp.custom_route("/connect",methods=["GET"])
     async def connect(request: Request):
-        state=secrets.token_urlsafe(32)
+        state=secrets.token_hex(24)
         await db("POST","amocrm_oauth_pending",payload={"state":state,"client_id":"pending","client_secret_enc":"pending","expires_at":(datetime.now(timezone.utc)+timedelta(minutes=15)).isoformat()},prefer="resolution=merge-duplicates,return=minimal")
         html=f"""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>Подключение amoCRM</title><style>body{{font:16px system-ui;background:#f5f7fb;display:grid;place-items:center;min-height:90vh}}main{{background:white;padding:32px;border-radius:16px;max-width:520px;box-shadow:0 8px 40px #14213d18}}a{{display:inline-block;padding:14px 20px;background:#2563eb;color:white;border-radius:10px;text-decoration:none}}small{{color:#555}}</style></head><body><main><h1>Подключить amoCRM</h1><p>Разрешите интеграции доступ к CRM. Токены будут храниться зашифрованными в базе данных.</p><p><script class="amocrm_oauth" charset="utf-8" data-name="VEB amoCRM MCP" data-description="Доступ ChatGPT к amoCRM через защищённый MCP-сервер" data-redirect_uri="{AMO_REDIRECT}" data-secrets_uri="{BASE}/oauth/secrets" data-scopes="crm" data-title="Подключить amoCRM" data-color="default" data-state="{state}" data-mode="popup" src="https://www.amocrm.ru/auth/button.min.js"></script></p><small>После подтверждения вернитесь сюда. Окно можно закрыть после сообщения об успехе.</small></main></body></html>"""
         return HTMLResponse(html,headers={"Cache-Control":"no-store"})
