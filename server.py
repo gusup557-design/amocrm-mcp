@@ -298,11 +298,19 @@ async def health_check(request: Request) -> JSONResponse:
             supabase_status = "connected" if response.is_success else f"error_{response.status_code}"
         except httpx.HTTPError:
             supabase_status = "unreachable"
+    amo_status = "not_connected"
+    try:
+        amo_rows = await db("GET", "amocrm_connections", params={"select":"account_id","limit":"1"})
+        if amo_rows:
+            amo_status = "connected"
+    except Exception:
+        pass
     return JSONResponse({
         "status": "ok",
         "service": "amoCRM MCP",
         "tools": 17,
         "supabase": supabase_status,
+        "amoCRM": amo_status,
     })
 
 
