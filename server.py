@@ -3,6 +3,7 @@ import json
 import httpx
 import re
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -241,6 +242,21 @@ async def get_notes(entity_type: str, entity_id: int) -> str:
     data = await api_get(f"/{entity_type}/{entity_id}/notes")
     return json.dumps(data, ensure_ascii=False, indent=2)
 
+
+# Vercel Python runtime entrypoint: Streamable HTTP at /mcp.
+# Allow only the actual Vercel project hostname and the active deployment hostname.
+_vercel_hosts = {
+    "amocrm-mcp-ascan-006.vercel.app",
+    os.environ.get("VERCEL_URL", "").strip(),
+}
+_allowed_hosts = []
+for _host in _vercel_hosts:
+    if _host:
+        _allowed_hosts.extend([_host, f"{_host}:*"])
+
+app = mcp.streamable_http_app(
+    transport_security=TransportSecuritySettings(allowed_hosts=_allowed_hosts)
+)
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
