@@ -46,3 +46,31 @@ Based on https://github.com/DocAtWork2026/amocrm-mcp (MIT License). This reposit
 ## License
 
 MIT
+
+
+## Vercel deployment
+
+This repository exposes the original 17 tools over MCP Streamable HTTP at:
+
+- MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
+- Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
+
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients.
+
+### Vercel environment variables
+
+Required for CRM API calls:
+- `AMOCRM_DOMAIN` — amoCRM subdomain, without protocol.
+- `AMOCRM_TOKEN` — long-lived token. Do not commit it.
+
+Optional Supabase connectivity check:
+- `SUPABASE_URL`
+- `SUPABASE_SECRET_KEY` (preferred) or `SUPABASE_SERVICE_ROLE_KEY` (legacy)
+
+Supabase keys are server-only. The health endpoint checks access to the existing `amocrm_connections` table without returning any CRM records or credentials.
+
+### Security notes
+
+- TLS certificate verification is enabled for all outbound amoCRM and Supabase requests.
+- Entity types used in note endpoints are allowlisted.
+- Secrets must be configured as sensitive Vercel environment variables and must never be committed.
