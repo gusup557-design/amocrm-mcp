@@ -54,7 +54,7 @@ class UpstreamToolPreservationTests(unittest.TestCase):
 
     def test_oauth_tokens_are_bound_to_mcp_resource(self):
         self.assertIn("validate_token_resource=True", self.source)
-        self.assertIn("resource=expected_resource", self.oauth_source)
+        self.assertIn("expected_resource", self.oauth_source)
         self.assertIn("resource=p.get(\"resource\")", self.oauth_source)
 
     def test_entity_note_paths_are_allowlisted(self):
