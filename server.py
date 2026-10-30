@@ -1,7 +1,7 @@
 import os
 import json
-import httpx
 import re
+import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
@@ -11,22 +11,16 @@ from starlette.responses import JSONResponse
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
 AMOCRM_TOKEN = os.environ.get("AMOCRM_TOKEN", "").strip()
 if AMOCRM_DOMAIN and not re.fullmatch(r"[A-Za-z0-9-]+", AMOCRM_DOMAIN):
-    raise RuntimeError("AMOCRM_DOMAIN must be an amoCRM subdomain without protocol or path")
+    raise RuntimeError("AMOCRM_DOMAIN must be a subdomain without protocol or path")
 BASE_URL = f"https://{AMOCRM_DOMAIN}.amocrm.ru/api/v4" if AMOCRM_DOMAIN else ""
 
-_vercel_hosts = {
-    "amocrm-mcp-ascan-006.vercel.app",
-    os.environ.get("VERCEL_URL", "").strip(),
-}
+_vercel_hosts = {"amocrm-mcp-ascan-006.vercel.app", os.environ.get("VERCEL_URL", "").strip()}
 _allowed_hosts = []
 for _host in _vercel_hosts:
     if _host:
         _allowed_hosts.extend([_host, f"{_host}:*"])
 
-mcp = FastMCP(
-    "amoCRM",
-    transport_security=TransportSecuritySettings(allowed_hosts=_allowed_hosts),
-)
+mcp = FastMCP("amoCRM", transport_security=TransportSecuritySettings(allowed_hosts=_allowed_hosts))
 
 
 def get_headers():
@@ -210,7 +204,11 @@ async def get_tasks(page: int = 1, limit: int = 50, order_by: str = "updated_at"
 @mcp.tool()
 async def create_task(text: str, complete_till: int, entity_id: int = 0, entity_type: str = "leads", task_type_id: int = 1) -> str:
     """Создать задачу. text — текст, complete_till — дедлайн (unix timestamp), entity_id — ID привязанной сущности, entity_type — тип (leads/contacts/companies), task_type_id — тип задачи (1=звонок, 2=встреча, 3=письмо)."""
-    task = {"text": text, "complete_till": complete_till, "task_type_id": task_type_id}
+    task = {
+        "text": text,
+        "complete_till": complete_till,
+        "task_type_id": task_type_id,
+    }
     if entity_id:
         task["entity_id"] = entity_id
         task["entity_type"] = entity_type
@@ -243,7 +241,12 @@ async def add_note(entity_type: str, entity_id: int, text: str) -> str:
     """Добавить примечание к сущности. entity_type — leads/contacts/companies, entity_id — ID сущности, text — текст примечания."""
     if entity_type not in {"leads", "contacts", "companies"}:
         raise ValueError("entity_type must be leads, contacts, or companies")
-    note = {"note_type": "common", "params": {"text": text}}
+    if entity_id <= 0:
+        raise ValueError("entity_id must be positive")
+    note = {
+        "note_type": "common",
+        "params": {"text": text}
+    }
     data = await api_post(f"/{entity_type}/{entity_id}/notes", [note])
     return json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -253,17 +256,18 @@ async def get_notes(entity_type: str, entity_id: int) -> str:
     """Получить примечания сущности. entity_type — leads/contacts/companies, entity_id — ID."""
     if entity_type not in {"leads", "contacts", "companies"}:
         raise ValueError("entity_type must be leads, contacts, or companies")
+    if entity_id <= 0:
+        raise ValueError("entity_id must be positive")
     data = await api_get(f"/{entity_type}/{entity_id}/notes")
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health_check(request: Request) -> JSONResponse:
-    """Public liveness check; does not expose credentials or CRM records."""
+    """Non-sensitive liveness check; never returns credentials or CRM records."""
     return JSONResponse({"status": "ok", "service": "amoCRM MCP", "tools": 17})
 
 
-# Vercel Python runtime entrypoint: Streamable HTTP at /mcp.
 app = mcp.streamable_http_app()
 
 if __name__ == "__main__":
