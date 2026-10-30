@@ -264,8 +264,33 @@ async def get_notes(entity_type: str, entity_id: int) -> str:
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health_check(request: Request) -> JSONResponse:
-    """Non-sensitive liveness check; never returns credentials or CRM records."""
-    return JSONResponse({"status": "ok", "service": "amoCRM MCP", "tools": 17})
+    """Non-sensitive liveness/readiness check; never returns credentials or CRM records."""
+    supabase_status = "not_configured"
+    supabase_url = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+    supabase_key = (
+        os.environ.get("SUPABASE_SECRET_KEY", "").strip()
+        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    )
+    if supabase_url and supabase_key:
+        headers = {"apikey": supabase_key, "Accept-Profile": "public"}
+        # Legacy service_role keys are JWTs; new sb_secret keys must be sent as apikey only.
+        if supabase_key.count(".") == 2:
+            headers["Authorization"] = f"Bearer {supabase_key}"
+        try:
+            async with httpx.AsyncClient(verify=True, timeout=8.0, follow_redirects=False) as client:
+                response = await client.get(
+                    f"{supabase_url}/rest/v1/amocrm_connections?select=account_id&limit=1",
+                    headers=headers,
+                )
+            supabase_status = "connected" if response.is_success else f"error_{response.status_code}"
+        except httpx.HTTPError:
+            supabase_status = "unreachable"
+    return JSONResponse({
+        "status": "ok",
+        "service": "amoCRM MCP",
+        "tools": 17,
+        "supabase": supabase_status,
+    })
 
 
 app = mcp.streamable_http_app()
