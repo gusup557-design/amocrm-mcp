@@ -59,6 +59,8 @@ async def api_get(path: str, params: dict = None) -> dict:
 
 
 async def api_post(path: str, data: dict) -> dict:
+    if os.environ.get("MCP_ALLOW_WRITE", "false").lower() != "true":
+        raise PermissionError("CRM write operations are disabled by default")
     if not path.startswith("/") or path.startswith("//"):
         raise ValueError("Invalid amoCRM API path")
     headers, base_url = await get_headers()
@@ -69,6 +71,8 @@ async def api_post(path: str, data: dict) -> dict:
 
 
 async def api_patch(path: str, data: dict) -> dict:
+    if os.environ.get("MCP_ALLOW_WRITE", "false").lower() != "true":
+        raise PermissionError("CRM write operations are disabled by default")
     if not path.startswith("/") or path.startswith("//"):
         raise ValueError("Invalid amoCRM API path")
     headers, base_url = await get_headers()
