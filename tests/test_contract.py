@@ -3,6 +3,7 @@ import pathlib
 import unittest
 
 SERVER = pathlib.Path(__file__).resolve().parents[1] / "server.py"
+OAUTH_BACKEND = pathlib.Path(__file__).resolve().parents[1] / "oauth_backend.py"
 
 
 class UpstreamToolPreservationTests(unittest.TestCase):
@@ -10,6 +11,8 @@ class UpstreamToolPreservationTests(unittest.TestCase):
     def setUpClass(cls):
         cls.source = SERVER.read_text(encoding="utf-8")
         cls.tree = ast.parse(cls.source)
+        cls.oauth_source = OAUTH_BACKEND.read_text(encoding="utf-8")
+        ast.parse(cls.oauth_source)
 
     def test_all_upstream_tools_are_preserved(self):
         exposed = set()
@@ -48,6 +51,11 @@ class UpstreamToolPreservationTests(unittest.TestCase):
     def test_supabase_health_probe_uses_existing_connections_table(self):
         self.assertIn("amocrm_connections?select=account_id", self.source)
         self.assertIn("SUPABASE_SERVICE_ROLE_KEY", self.source)
+
+    def test_oauth_tokens_are_bound_to_mcp_resource(self):
+        self.assertIn("validate_token_resource=True", self.source)
+        self.assertIn("resource=expected_resource", self.oauth_source)
+        self.assertIn("resource=p.get(\"resource\")", self.oauth_source)
 
     def test_entity_note_paths_are_allowlisted(self):
         self.assertGreaterEqual(self.source.count('entity_type not in {"leads", "contacts", "companies"}'), 2)
