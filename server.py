@@ -12,7 +12,19 @@ if AMOCRM_DOMAIN and not re.fullmatch(r"[A-Za-z0-9-]+", AMOCRM_DOMAIN):
     raise RuntimeError("AMOCRM_DOMAIN must be an amoCRM subdomain without protocol or path")
 BASE_URL = f"https://{AMOCRM_DOMAIN}.amocrm.ru/api/v4" if AMOCRM_DOMAIN else ""
 
-mcp = FastMCP("amoCRM")
+_vercel_hosts = {
+    "amocrm-mcp-ascan-006.vercel.app",
+    os.environ.get("VERCEL_URL", "").strip(),
+}
+_allowed_hosts = []
+for _host in _vercel_hosts:
+    if _host:
+        _allowed_hosts.extend([_host, f"{_host}:*"])
+
+mcp = FastMCP(
+    "amoCRM",
+    transport_security=TransportSecuritySettings(allowed_hosts=_allowed_hosts),
+)
 
 
 def get_headers():
@@ -244,19 +256,7 @@ async def get_notes(entity_type: str, entity_id: int) -> str:
 
 
 # Vercel Python runtime entrypoint: Streamable HTTP at /mcp.
-# Allow only the actual Vercel project hostname and the active deployment hostname.
-_vercel_hosts = {
-    "amocrm-mcp-ascan-006.vercel.app",
-    os.environ.get("VERCEL_URL", "").strip(),
-}
-_allowed_hosts = []
-for _host in _vercel_hosts:
-    if _host:
-        _allowed_hosts.extend([_host, f"{_host}:*"])
-
-app = mcp.streamable_http_app(
-    transport_security=TransportSecuritySettings(allowed_hosts=_allowed_hosts)
-)
+app = mcp.streamable_http_app()
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
