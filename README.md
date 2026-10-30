@@ -74,3 +74,17 @@ Supabase keys are server-only. The health endpoint checks access to the existing
 - TLS certificate verification is enabled for all outbound amoCRM and Supabase requests.
 - Entity types used in note endpoints are allowlisted.
 - Secrets must be configured as sensitive Vercel environment variables and must never be committed.
+
+
+## Remote OAuth deployment
+
+Production MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
+
+- amoCRM account connection: `https://amocrm-mcp-ascan-006.vercel.app/connect`
+- amoCRM callback: `https://amocrm-mcp-ascan-006.vercel.app/oauth/callback`
+- amoCRM external integration secrets webhook: `https://amocrm-mcp-ascan-006.vercel.app/oauth/secrets`
+- MCP OAuth uses Authorization Code + PKCE, Dynamic Client Registration, persistent Supabase state, and bearer-token validation.
+- Owner consent is protected by the sensitive Vercel variable `MCP_ADMIN_PASSWORD`.
+- amoCRM credentials and OAuth tokens are encrypted with AES-256-GCM using `MCP_TOKEN_ENCRYPTION_KEY`; MCP bearer tokens are stored as SHA-256 hashes.
+- `MCP_ALLOW_WRITE` defaults to `false`. Original write tools remain present, but create/update/note operations are blocked unless the owner deliberately sets this variable to `true`.
+- `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` must be available to the Vercel production runtime.
