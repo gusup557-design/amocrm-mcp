@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse
 from oauth_backend import provider, register_amo_routes, amo_access_token, db
 from language_support import SUPPORTED_LANGUAGES, get_language_profile, resolve_language
 from chat_api import AmoChatApiClient
+from transcription import transcribe_source_url
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -602,6 +603,23 @@ async def chat_send_text_message(
         },
     }
     return _dump(await _chat_api_client().send_message(payload))
+
+
+@mcp.tool()
+async def transcription_transcribe_audio_url(
+    audio_url: str,
+    language: str = "",
+    diarize: bool = True,
+    tag_audio_events: bool = True,
+) -> str:
+    """Транскрибировать запись звонка через ElevenLabs Scribe v2. Требуются API key, allowlist доменов и MCP_ALLOW_PAID_AI=true."""
+    result = await transcribe_source_url(
+        audio_url=audio_url,
+        language=language,
+        diarize=diarize,
+        tag_audio_events=tag_audio_events,
+    )
+    return _dump(result)
 
 
 @mcp.tool()
