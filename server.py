@@ -17,6 +17,7 @@ from voice_telephony import start_outbound_call
 from webhook_security import verify_amocrm_chat_signature, verify_elevenlabs_signature
 from webhook_events import build_webhook_event_identity
 from conversation_automation import build_post_call_action_plan
+from connection_lifecycle import ensure_disconnect_confirmation, public_connection_summaries
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -316,6 +317,47 @@ def _json_arg(value: str, expected_type):
     if not isinstance(parsed, expected_type):
         raise ValueError("JSON имеет неверный тип")
     return parsed
+
+
+@mcp.tool()
+async def list_amocrm_connections() -> str:
+    """Показать подключённые к MCP аккаунты amoCRM без токенов и секретов."""
+    rows = await db(
+        "GET",
+        "amocrm_connections",
+        params={"select": "account_id,base_domain,expires_at", "order": "account_id.asc", "limit": "100"},
+    )
+    return _dump({
+        "connected_accounts": public_connection_summaries(rows),
+        "active_account_policy": "exactly_one",
+        "requires_disconnect_before_switch": True,
+    })
+
+
+@mcp.tool()
+async def disconnect_amocrm_connection(account_id: int, confirm_disconnect: bool = False) -> str:
+    """Удалить локально сохранённые OAuth-данные одного аккаунта MCP. Не удаляет интеграцию в amoCRM."""
+    if isinstance(account_id, bool) or account_id <= 0:
+        raise ValueError("account_id must be a positive integer")
+    ensure_disconnect_confirmation(confirm_disconnect)
+    deleted = await db(
+        "DELETE",
+        "amocrm_connections",
+        params={"account_id": "eq." + str(account_id)},
+        prefer="return=representation",
+    )
+    if not deleted:
+        raise LookupError("No MCP connection found for the supplied account_id")
+    return _dump({
+        "account_id": account_id,
+        "mcp_oauth_credentials_removed": True,
+        "amoCRM_integration_revoked": False,
+        "manual_next_step": (
+            "If access should be fully removed, uninstall or revoke this MCP integration "
+            in the customer's amoCRM account. Confirm any other client-owned integrations "
+            "remain installed before handing the account back."
+        ),
+    })
 
 
 @mcp.tool()
