@@ -48,6 +48,18 @@ def build_chat_headers(
     }
 
 
+def verify_chat_webhook_signature(body: bytes, secret: str, signature: str) -> bool:
+    """Verify amoCRM Chat API webhooks (HMAC-SHA1 over the trimmed raw body)."""
+    if not isinstance(body, bytes) or not isinstance(secret, str) or not secret.strip():
+        return False
+    if not isinstance(signature, str) or not signature.strip():
+        return False
+    expected = hmac.new(
+        secret.encode("utf-8"), body.strip(), hashlib.sha1
+    ).hexdigest().lower()
+    return hmac.compare_digest(expected, signature.strip().lower())
+
+
 class AmoChatApiClient:
     """Async Chat API client. Channel secrets are never logged or returned."""
 
