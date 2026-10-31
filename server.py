@@ -18,6 +18,7 @@ from webhook_security import verify_amocrm_chat_signature, verify_elevenlabs_sig
 from webhook_events import build_webhook_event_identity
 from conversation_automation import build_post_call_action_plan
 from connection_lifecycle import ensure_disconnect_confirmation, public_connection_summaries
+from provisioning import build_client_setup_plan, get_provider_catalog, validate_sip_endpoint
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -357,6 +358,130 @@ async def disconnect_amocrm_connection(account_id: int, confirm_disconnect: bool
             "in the customer's amoCRM account. Confirm any other client-owned integrations "
             "remain installed before handing the account back."
         ),
+    })
+
+
+@mcp.tool()
+async def get_provider_catalog() -> str:
+    """Получить каталог телефонии и разделение API-возможностей и ручных действий."""
+    return _dump(get_provider_catalog())
+
+
+@mcp.tool()
+async def get_telephony_provider_guide(provider: str) -> str:
+    """Получить пошаговую инструкцию для конкретного SIP/телефонного провайдера."""
+    catalog = get_provider_catalog()
+    if provider not in catalog:
+        raise ValueError("Unsupported telephony provider")
+    return _dump(catalog[provider])
+
+
+@mcp.tool()
+async def get_client_setup_plan(
+    business_type: str,
+    telephony_provider: str,
+    requested_channels_json: str = "[]",
+) -> str:
+    """Сформировать план настройки клиента без сохранения профиля и без изменения сервисов."""
+    channels = _json_arg(requested_channels_json, list)
+    return _dump(build_client_setup_plan(
+        business_type=business_type,
+        telephony_provider=telephony_provider,
+        requested_channels=channels,
+    ))
+
+
+@mcp.tool()
+async def validate_sip_endpoint_settings(host: str, port: int, transport: str) -> str:
+    """Проверить формат SIP-хоста, порта и транспорта; проверка не соединяется с сервером."""
+    return _dump(validate_sip_endpoint(host, port, transport))
+
+
+@mcp.tool()
+async def get_amocrm_setup_report() -> str:
+    """Провести read-only аудит подключённой amoCRM: аккаунт, воронки, пользователи, поля, вебхуки и каналы."""
+    connections = await db(
+        "GET",
+        "amocrm_connections",
+        params={"select": "account_id,base_domain,expires_at", "order": "account_id.asc", "limit": "100"},
+    )
+    safe_connections = public_connection_summaries(connections)
+    if not safe_connections:
+        return _dump({
+            "status": "not_connected",
+            "message": "Connect one customer account through /connect first.",
+            "checks": {},
+            "writes_performed": False,
+        })
+    if len(safe_connections) != 1:
+        return _dump({
+            "status": "ambiguous_connection",
+            "connected_accounts": safe_connections,
+            "message": "Disconnect all but one account before running the CRM audit.",
+            "checks": {},
+            "writes_performed": False,
+        })
+
+    account_data = None
+    checks = {}
+
+    async def inspect(name: str, path: str, params: dict | None = None) -> None:
+        try:
+            data = await api_get(path, params)
+            if name == "account":
+                account = data.get("account", data) if isinstance(data, dict) else {}
+                checks[name] = {"status": "ok"}
+                nonlocal account_data
+                account_data = {
+                    key: account[key]
+                    for key in ("id", "name", "subdomain", "currency", "timezone")
+                    if isinstance(account, dict) and key in account
+                }
+                return
+            total = data.get("_total_items") if isinstance(data, dict) else None
+            embedded = data.get("_embedded", {}) if isinstance(data, dict) else {}
+            if not isinstance(total, int):
+                arrays = [value for value in embedded.values() if isinstance(value, list)] if isinstance(embedded, dict) else []
+                total = len(arrays[0]) if arrays else 0
+            checks[name] = {"status": "ok", "count": total}
+        except Exception as exc:
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            checks[name] = {
+                "status": "error",
+                "error_type": type(exc).__name__,
+                "http_status": status_code,
+            }
+
+    audits = [
+        ("account", "/account", {"with": "amojo_id,amojo_rights,users_groups,task_types,version,entity_names,datetime_settings"}),
+        ("pipelines", "/leads/pipelines", {"limit": 250}),
+        ("users", "/users", {"limit": 250}),
+        ("lead_fields", "/leads/custom_fields", {"limit": 250}),
+        ("contact_fields", "/contacts/custom_fields", {"limit": 250}),
+        ("company_fields", "/companies/custom_fields", {"limit": 250}),
+        ("sources", "/sources", {"limit": 250}),
+        ("webhooks", "/webhooks", {"limit": 100}),
+        ("widgets", "/widgets", {"limit": 250}),
+        ("catalogs", "/catalogs", {"limit": 250}),
+    ]
+    for name, path, params in audits:
+        await inspect(name, path, params)
+
+    successful = sum(1 for value in checks.values() if value["status"] == "ok")
+    failed = len(checks) - successful
+    return _dump({
+        "status": "ready_for_review" if failed == 0 else "needs_attention",
+        "connected_account": safe_connections[0],
+        "account": account_data,
+        "checks": checks,
+        "summary": {"passed": successful, "failed": failed, "total": len(checks)},
+        "write_mode_enabled": os.environ.get("MCP_ALLOW_WRITE", "false").lower() == "true",
+        "writes_performed": False,
+        "manual_follow_up": [
+            "Confirm provider and channel ownership with the customer.",
+            "Inspect API permissions and account-specific feature availability.",
+            "Do not run paid calls or send external messages until the customer approves a test.",
+        ],
     })
 
 
