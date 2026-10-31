@@ -62,12 +62,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes 55 amoCRM MCP tools over MCP Streamable HTTP at:
+This repository exposes 58 amoCRM MCP tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 55 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 58 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -100,6 +100,14 @@ Supabase and encryption keys are server-only. The health endpoint checks connect
 
 
 
+
+
+## Custom field management
+
+- `get_custom_fields(entity_type)` reads fields for leads, contacts and companies.
+- `create_custom_field(entity_type, field_json, confirm_write=true)` creates a field after validating the documented request shape.
+- `update_custom_field(entity_type, field_id, field_json, confirm_write=true)` reads the existing field first and protects predefined fields. Changing enum options additionally requires `confirm_enum_changes=true`; existing IDs are preserved for options whose labels are unchanged.
+- `delete_custom_field(entity_type, field_id, confirm_delete=true)` reads the field and proceeds only if amoCRM returns `is_deletable=true`. amoCRM deletes the stored field values along with the field. All three mutations also require `MCP_ALLOW_WRITE=true` and administrator access.
 
 ## Client provisioning and setup audit
 
