@@ -19,6 +19,12 @@ from conversation_automation import build_post_call_action_plan
 from connection_lifecycle import ensure_disconnect_confirmation, public_connection_summaries
 from provisioning import build_client_setup_plan, get_provider_catalog as build_provider_catalog, validate_sip_endpoint
 from handover import build_client_handover_checklist
+from custom_fields import (
+    ensure_custom_field_is_deletable,
+    normalize_custom_field_entity,
+    preserve_enum_ids_for_update,
+    validate_custom_field_payload,
+)
 
 # amoCRM account and API base domain are resolved from the active OAuth connection.
 
@@ -525,9 +531,70 @@ async def get_talk(talk_id: int) -> str:
 @mcp.tool()
 async def get_custom_fields(entity_type: str) -> str:
     """Получить пользовательские поля leads, contacts или companies."""
-    if entity_type not in {"leads", "contacts", "companies"}:
-        raise ValueError("entity_type must be leads, contacts, or companies")
-    return _dump(await api_get(f"/{entity_type}/custom_fields", {"limit": 250}))
+    entity = normalize_custom_field_entity(entity_type)
+    return _dump(await api_get(f"/{entity}/custom_fields", {"limit": 250}))
+
+
+@mcp.tool()
+async def create_custom_field(
+    entity_type: str,
+    field_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Создать пользовательское поле. Требует confirm_write=true, MCP_ALLOW_WRITE=true и прав администратора."""
+    entity = normalize_custom_field_entity(entity_type)
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the custom field definition")
+    payload = validate_custom_field_payload(_json_arg(field_json, dict), "create")
+    return _dump(await api_post(f"/{entity}/custom_fields", [payload]))
+
+
+@mcp.tool()
+async def update_custom_field(
+    entity_type: str,
+    field_id: int,
+    field_json: str,
+    confirm_write: bool = False,
+    confirm_enum_changes: bool = False,
+) -> str:
+    """Изменить поле. Требует явного подтверждения; замена списка вариантов требует confirm_enum_changes=true."""
+    entity = normalize_custom_field_entity(entity_type)
+    if isinstance(field_id, bool) or field_id <= 0:
+        raise ValueError("field_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the custom field update")
+    payload = validate_custom_field_payload(_json_arg(field_json, dict), "update")
+    current = await api_get(f"/{entity}/custom_fields/{field_id}")
+    if current.get("id") != field_id:
+        raise RuntimeError("amoCRM returned a different custom field; refusing to update")
+    if current.get("is_predefined") is True:
+        raise PermissionError("Predefined custom fields are protected from MCP updates")
+    payload = preserve_enum_ids_for_update(current, payload, confirm_enum_changes)
+    return _dump(await api_patch(f"/{entity}/custom_fields/{field_id}", payload))
+
+
+@mcp.tool()
+async def delete_custom_field(
+    entity_type: str,
+    field_id: int,
+    confirm_delete: bool = False,
+) -> str:
+    """Удалить поле только при is_deletable=true; значения поля в CRM будут удалены безвозвратно."""
+    entity = normalize_custom_field_entity(entity_type)
+    if isinstance(field_id, bool) or field_id <= 0:
+        raise ValueError("field_id must be a positive integer")
+    if confirm_delete is not True:
+        raise PermissionError("Set confirm_delete=true after reviewing the field and its stored values")
+    current = await api_get(f"/{entity}/custom_fields/{field_id}")
+    ensure_custom_field_is_deletable(current, field_id)
+    result = await api_delete(f"/{entity}/custom_fields/{field_id}")
+    return _dump({
+        "field_id": field_id,
+        "entity_type": entity,
+        "deleted": True,
+        "warning": "amoCRM deletes the stored values of this custom field together with the field.",
+        "api_result": result,
+    })
 
 
 @mcp.tool()
