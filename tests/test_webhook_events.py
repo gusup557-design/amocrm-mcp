@@ -25,17 +25,25 @@ class WebhookEventIdentityTests(unittest.TestCase):
             (
                 "elevenlabs",
                 "post_call_transcription",
-                "conv-abc:1739537297",
+                "post_call_transcription:conv-abc:1739537297",
                 "conv-abc",
             ),
         )
+
+    def test_distinguishes_event_types_for_the_same_conversation_timestamp(self):
+        transcript = {"type": "post_call_transcription", "event_timestamp": 7, "data": {"conversation_id": "c"}}
+        failure = {"type": "call_initiation_failure", "event_timestamp": 7, "data": {"conversation_id": "c"}}
+        transcript_id = build_webhook_event_identity("elevenlabs", transcript, b"one")[2]
+        failure_id = build_webhook_event_identity("elevenlabs", failure, b"two")[2]
+        self.assertNotEqual(transcript_id, failure_id)
 
     def test_unknown_or_incomplete_events_use_body_digest_fallback(self):
         payload = {"type": "custom_event", "data": {}}
         result = build_webhook_event_identity("elevenlabs", payload, b"same-body")
         self.assertEqual(result[0], "elevenlabs")
         self.assertEqual(result[1], "custom_event")
-        self.assertEqual(result[2], result[2])
+        import hashlib
+        self.assertEqual(result[2], hashlib.sha256(b"same-body").hexdigest())
         self.assertIsNone(result[3])
 
     def test_rejects_unknown_provider_and_invalid_payload(self):
