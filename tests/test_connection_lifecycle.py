@@ -61,6 +61,16 @@ class ConnectionSelectionTests(unittest.TestCase):
             self.assertNotIn(secret, serialized)
 
 
+    def test_legacy_static_amo_credentials_are_not_used(self):
+        root = pathlib.Path(__file__).resolve().parents[1]
+        server_source = (root / "server.py").read_text(encoding="utf-8")
+        env_example = (root / ".env.example").read_text(encoding="utf-8")
+        self.assertNotIn('os.environ.get("AMOCRM_TOKEN"', server_source)
+        self.assertNotIn('os.environ.get("AMOCRM_DOMAIN"', server_source)
+        self.assertNotIn("AMOCRM_TOKEN=", env_example)
+        self.assertNotIn("AMOCRM_DOMAIN=", env_example)
+
+
 class ConnectionToolContractTests(unittest.TestCase):
     def test_connection_management_tools_are_exposed(self):
         server_path = pathlib.Path(__file__).resolve().parents[1] / "server.py"
