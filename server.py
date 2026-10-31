@@ -13,6 +13,7 @@ from oauth_backend import provider, register_amo_routes, amo_access_token, db
 from language_support import SUPPORTED_LANGUAGES, get_language_profile, resolve_language
 from chat_api import AmoChatApiClient
 from transcription import transcribe_source_url
+from voice_telephony import start_outbound_call
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -618,6 +619,16 @@ async def transcription_transcribe_audio_url(
         language=language,
         diarize=diarize,
         tag_audio_events=tag_audio_events,
+    )
+    return _dump(result)
+
+
+@mcp.tool()
+async def voice_start_outbound_call(to_number: str, confirm_call: bool = False) -> str:
+    """Начать исходящий AI-звонок через ElevenLabs SIP. Требуются allowlist номера, включённые платные операции и явное confirm_call=true."""
+    result = await start_outbound_call(
+        to_number=to_number,
+        confirm_call=confirm_call,
     )
     return _dump(result)
 
