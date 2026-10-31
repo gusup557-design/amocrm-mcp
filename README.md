@@ -62,12 +62,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes 67 amoCRM MCP tools over MCP Streamable HTTP at:
+This repository exposes 71 amoCRM MCP tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 67 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 71 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -102,6 +102,14 @@ Supabase and encryption keys are server-only. The health endpoint checks connect
 
 
 
+
+
+## Contact, company and task updates
+
+- `get_task(task_id)` reads one task.
+- `update_task(task_id, task_json, confirm_write=true)` updates/reschedules or completes a task after read-before-write verification. Completing a task requires a non-empty `result.text`.
+- `update_contact(contact_id, contact_json, confirm_write=true)` and `update_company(company_id, company_json, confirm_write=true)` update documented writable fields only, with read-before-write ID checks.
+- All mutations require `MCP_ALLOW_WRITE=true`, explicit `confirm_write=true`, valid administrator permissions and supported request fields. No hard-delete operation for contacts or companies is exposed because a supported delete route was not confirmed in the official API material reviewed for this branch.
 
 ## Pipeline status management
 
