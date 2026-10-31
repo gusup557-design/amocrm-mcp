@@ -26,11 +26,11 @@ class LanguageMcpToolContractTests(unittest.TestCase):
 
     def test_language_tools_are_exposed_over_mcp(self):
         self.assertTrue(
-            {"get_supported_languages", "resolve_conversation_language"}.issubset(self.tools)
+            {"get_supported_languages", "resolve_conversation_language", "chat_get_history", "chat_send_text_message"}.issubset(self.tools)
         )
 
     def test_original_forty_tools_are_preserved_and_two_added(self):
-        self.assertEqual(len(self.tools), 42)
+        self.assertEqual(len(self.tools), 44)
 
     def test_language_module_is_imported_by_server(self):
         self.assertIn("from language_support import", self.source)
