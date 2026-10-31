@@ -13,7 +13,7 @@ MCP (Model Context Protocol) server for amoCRM integration with ChatGPT and othe
 - **Notes** -- add and read notes on any entity
 - **Account** -- get account info
 - **Salesbot** -- inspect Salesbot configurations
-- **Chats** -- inspect talks and chat templates
+- **Chats** -- inspect talks and chat templates, read Chat API history, and send guarded text messages
 - **Custom fields** -- inspect lead/contact/company fields
 - **Events** -- read CRM audit events
 - **Sources and webhooks** -- inspect channels and webhook subscriptions
@@ -60,12 +60,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes 40 amoCRM tools over MCP Streamable HTTP at:
+This repository exposes 44 amoCRM MCP tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 42 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 44 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -77,7 +77,10 @@ Required:
 
 Optional:
 - `AMOCRM_REDIRECT_URI` — defaults to the production callback
-- `MCP_ALLOW_WRITE` — defaults to `false`; only set to `true` to enable CRM write tools
+- `MCP_ALLOW_WRITE` — defaults to `false`; only set to `true` to enable CRM and Chat API write tools
+- `AMOCHAT_SCOPE_ID` and `AMOCHAT_CHANNEL_SECRET` — required for Chat API reads and writes
+- `AMOCHAT_BOT_CLIENT_ID`, `AMOCHAT_BOT_REF_ID`, `AMOCHAT_BOT_NAME` — required for outbound bot messages
+- `AMOCHAT_BASE_URL` — defaults to `https://amojo.amocrm.ru`
 
 Supabase and encryption keys are server-only. The health endpoint checks connectivity without returning CRM records or credentials.
 
