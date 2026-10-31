@@ -15,7 +15,7 @@ def select_single_active_connection(rows: Sequence[Mapping[str, Any]]) -> Mappin
         raise RuntimeError("amoCRM is not connected. Open /connect first.")
     if len(rows) != 1:
         raise RuntimeError(
-            "More than one amoCRM account is connected. Disconnect all but one "
+            "more than one amoCRM account is connected. Disconnect all but one "
             "account before using CRM tools."
         )
     return rows[0]
@@ -30,7 +30,7 @@ def ensure_no_other_active_account(
         existing = str(row.get("account_id", ""))
         if existing and existing != requested:
             raise PermissionError(
-                "A different amoCRM account is already connected. Disconnect it "
+                "A different amoCRM account is already connected; disconnect it Disconnect it "
                 "through the MCP before connecting another client account."
             )
 
