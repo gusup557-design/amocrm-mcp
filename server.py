@@ -1,6 +1,5 @@
 import os
 import json
-import re
 import time
 import uuid
 import httpx
@@ -21,12 +20,7 @@ from connection_lifecycle import ensure_disconnect_confirmation, public_connecti
 from provisioning import build_client_setup_plan, get_provider_catalog as build_provider_catalog, validate_sip_endpoint
 from handover import build_client_handover_checklist
 
-# Конфигурация
-AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
-AMOCRM_TOKEN = os.environ.get("AMOCRM_TOKEN", "").strip()
-if AMOCRM_DOMAIN and not re.fullmatch(r"[A-Za-z0-9-]+", AMOCRM_DOMAIN):
-    raise RuntimeError("AMOCRM_DOMAIN must be a subdomain without protocol or path")
-BASE_URL = f"https://{AMOCRM_DOMAIN}.amocrm.ru/api/v4" if AMOCRM_DOMAIN else ""
+# amoCRM account and API base domain are resolved from the active OAuth connection.
 
 _vercel_hosts = {"amocrm-mcp-ascan-006.vercel.app", os.environ.get("VERCEL_URL", "").strip()}
 _allowed_hosts = []
