@@ -42,7 +42,7 @@ def verify_elevenlabs_signature(
     webhook_secret: str,
     *,
     now: Optional[int] = None,
-    tolerance_seconds: int = 300,
+    tolerance_seconds: int = 1800,
 ) -> bool:
     """Verify ElevenLabs t=...,v0=... HMAC-SHA256 with replay-window checks."""
     if not isinstance(raw_body, bytes):
