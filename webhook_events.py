@@ -44,7 +44,7 @@ def build_webhook_event_identity(
         conversation_id = None
     timestamp = payload.get("event_timestamp")
     if conversation_id and timestamp is not None:
-        event_id = f"{conversation_id}:{timestamp}"
+        event_id = f"{event_type}:{conversation_id}:{timestamp}"
     else:
         event_id = hashlib.sha256(raw_body).hexdigest()
     return provider, event_type, event_id, conversation_id
