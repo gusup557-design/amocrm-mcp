@@ -676,7 +676,7 @@ async def health_check(request: Request) -> JSONResponse:
     return JSONResponse({
         "status": "ok",
         "service": "amoCRM MCP",
-        "tools": 44,
+        "tools": 45,
         "supabase": supabase_status,
         "amoCRM": amo_status,
     })
