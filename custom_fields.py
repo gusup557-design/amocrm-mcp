@@ -132,6 +132,38 @@ def validate_custom_field_payload(payload: dict[str, Any], operation: str) -> di
     return dict(payload)
 
 
+def preserve_enum_ids_for_update(
+    current_field: Mapping[str, Any],
+    payload: dict[str, Any],
+    confirm_enum_changes: bool,
+) -> dict[str, Any]:
+    """Preserve IDs for unchanged options and require confirmation before replacing enum values."""
+    if "enums" not in payload:
+        return dict(payload)
+    if confirm_enum_changes is not True:
+        raise PermissionError(
+            "Changing enum options can invalidate existing option IDs. "
+            "Set confirm_enum_changes=true after reviewing the complete replacement list."
+        )
+    existing = current_field.get("enums", [])
+    existing_ids = {
+        item.get("value"): item.get("id")
+        for item in existing
+        if isinstance(item, Mapping)
+        and isinstance(item.get("value"), str)
+        and _positive_int(item.get("id"))
+    } if isinstance(existing, list) else {}
+    updated = dict(payload)
+    updated_enums = []
+    for item in payload["enums"]:
+        candidate = dict(item)
+        if "id" not in candidate and candidate.get("value") in existing_ids:
+            candidate["id"] = existing_ids[candidate["value"]]
+        updated_enums.append(candidate)
+    updated["enums"] = updated_enums
+    return updated
+
+
 def ensure_custom_field_is_deletable(field: Mapping[str, Any], expected_field_id: int) -> None:
     """Fail closed unless the exact field exists and amoCRM marks it deletable."""
     if not _positive_int(expected_field_id):
