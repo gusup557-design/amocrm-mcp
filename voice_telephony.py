@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import re
 
+from language_support import normalize_language
+
 
 _E164 = re.compile(r"^\+[1-9][0-9]{7,14}$")
 
@@ -16,7 +18,48 @@ def validate_outbound_number(number: str, allowed_numbers: list[str]) -> str:
     return number.strip()
 
 
-async def start_outbound_call(to_number: str, confirm_call: bool = False) -> dict:
+def build_outbound_call_payload(
+    agent_id: str,
+    phone_number_id: str,
+    to_number: str,
+    crm_contact_id: int | str | None = None,
+    preferred_language: str = "",
+) -> dict:
+    """Build SIP call request with optional CRM correlation metadata."""
+    payload = {
+        "agent_id": agent_id,
+        "agent_phone_number_id": phone_number_id,
+        "to_number": to_number,
+    }
+    dynamic_variables = {}
+    if crm_contact_id not in (None, "", 0):
+        if isinstance(crm_contact_id, bool):
+            raise ValueError("crm_contact_id must be a positive integer")
+        try:
+            contact_id = int(crm_contact_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("crm_contact_id must be a positive integer") from exc
+        if contact_id <= 0:
+            raise ValueError("crm_contact_id must be a positive integer")
+        dynamic_variables["crm_contact_id"] = str(contact_id)
+    if preferred_language.strip():
+        locale = normalize_language(preferred_language)
+        if locale is None:
+            raise ValueError("preferred_language must be ru, ky, kk, or uz")
+        dynamic_variables["preferred_language"] = locale
+    if dynamic_variables:
+        payload["conversation_initiation_client_data"] = {
+            "dynamic_variables": dynamic_variables
+        }
+    return payload
+
+
+async def start_outbound_call(
+    to_number: str,
+    confirm_call: bool = False,
+    crm_contact_id: int | str | None = None,
+    preferred_language: str = "",
+) -> dict:
     if not confirm_call:
         raise PermissionError("Each outbound call requires explicit confirm_call=true")
     if os.environ.get("MCP_ALLOW_PAID_AI", "false").lower() != "true":
@@ -40,11 +83,13 @@ async def start_outbound_call(to_number: str, confirm_call: bool = False) -> dic
         response = await client.post(
             "https://api.elevenlabs.io/v1/convai/sip-trunk/outbound-call",
             headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-            json={
-                "agent_id": agent_id,
-                "agent_phone_number_id": phone_number_id,
-                "to_number": destination,
-            },
+            json=build_outbound_call_payload(
+                agent_id=agent_id,
+                phone_number_id=phone_number_id,
+                to_number=destination,
+                crm_contact_id=crm_contact_id,
+                preferred_language=preferred_language,
+            ),
         )
         response.raise_for_status()
         result = response.json()
