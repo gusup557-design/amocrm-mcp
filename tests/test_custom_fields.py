@@ -5,6 +5,7 @@ import unittest
 from custom_fields import (
     ensure_custom_field_is_deletable,
     normalize_custom_field_entity,
+    preserve_enum_ids_for_update,
     validate_custom_field_payload,
 )
 
@@ -78,6 +79,28 @@ class CustomFieldPayloadTests(unittest.TestCase):
         invalid = {**payload, "required_statuses": [{"pipeline_id": 12}]}
         with self.assertRaises(ValueError):
             validate_custom_field_payload(invalid, "create")
+
+    def test_enum_updates_require_confirmation_and_preserve_matching_ids(self):
+        current = {
+            "id": 10,
+            "type": "select",
+            "enums": [
+                {"id": 101, "value": "Один", "sort": 1},
+                {"id": 102, "value": "Два", "sort": 2},
+            ],
+        }
+        payload = {
+            "name": "Вариант",
+            "enums": [
+                {"value": "Один", "sort": 1},
+                {"value": "Три", "sort": 2},
+            ],
+        }
+        with self.assertRaises(PermissionError):
+            preserve_enum_ids_for_update(current, payload, False)
+        result = preserve_enum_ids_for_update(current, payload, True)
+        self.assertEqual(result["enums"][0]["id"], 101)
+        self.assertNotIn("id", result["enums"][1])
 
     def test_delete_requires_explicitly_deletable_field(self):
         ensure_custom_field_is_deletable({"id": 3, "is_deletable": True}, 3)
