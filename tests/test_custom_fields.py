@@ -155,6 +155,27 @@ class CustomFieldPayloadTests(unittest.TestCase):
 
 
 class CustomFieldToolContractTests(unittest.TestCase):
+    def test_custom_field_group_tools_are_exposed_and_guarded(self):
+        path = pathlib.Path(__file__).resolve().parents[1] / "server.py"
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        functions = {
+            node.name: node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        expected = {
+            "get_custom_field_groups",
+            "create_custom_field_group",
+            "update_custom_field_group",
+            "delete_custom_field_group",
+        }
+        self.assertTrue(expected.issubset(functions))
+        for name in ("create_custom_field_group", "update_custom_field_group", "delete_custom_field_group"):
+            with self.subTest(name=name):
+                body = ast.get_source_segment(source, functions[name])
+                self.assertIn("confirm_", body)
+
     def test_create_update_delete_tools_are_guarded(self):
         path = pathlib.Path(__file__).resolve().parents[1] / "server.py"
         tree = ast.parse(path.read_text(encoding="utf-8"))
