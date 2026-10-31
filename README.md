@@ -19,6 +19,7 @@ MCP (Model Context Protocol) server for amoCRM integration with ChatGPT and othe
 - **Sources and webhooks** -- inspect channels and webhook subscriptions
 - **Calls** -- add completed call records to CRM cards (does not initiate calls)
 - **Transcription** -- guarded ElevenLabs Scribe v2 transcription with speaker diarization and RU/KY/KK/UZ locale mapping
+- **Voice telephony** -- explicitly confirmed, allowlisted ElevenLabs SIP outbound calls
 - **Conversation languages** -- RU/KY/KK/UZ locale profiles and deterministic language preference resolution
 - **Catalogs and tags** -- inspect catalog items and entity tags
 - **Widgets** -- inspect installed and available widgets
@@ -61,12 +62,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes 45 amoCRM MCP tools over MCP Streamable HTTP at:
+This repository exposes 46 amoCRM MCP tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 45 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 46 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -85,6 +86,9 @@ Optional:
 - `ELEVENLABS_API_KEY` — required for Scribe v2 transcription
 - `TRANSCRIPTION_ALLOWED_HOSTS` — comma-separated HTTPS host allowlist for call recording URLs
 - `MCP_ALLOW_PAID_AI` — defaults to `false`; required to deliberately enable paid AI API operations
+- `ELEVENLABS_AGENT_ID` and `ELEVENLABS_PHONE_NUMBER_ID` — required for outbound SIP calls
+- `MCP_ALLOW_OUTBOUND_CALLS` — defaults to `false`; outbound calls also require `confirm_call=true`
+- `VOICE_CALL_ALLOWED_NUMBERS` — comma-separated E.164 destination allowlist
 
 Supabase and encryption keys are server-only. The health endpoint checks connectivity without returning CRM records or credentials.
 
@@ -112,6 +116,10 @@ Production MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 
 MCP tools `get_supported_languages` and `resolve_conversation_language` expose the initial RU/KY/KK/UZ language contract. The resolver accepts short codes and locale tags, prioritizes an explicitly saved contact preference, then an STT/chat provider's detected language, then a configured fallback, and finally Russian. Detection, translation, transcription, and text-to-speech are separate provider integrations and are not enabled by this language foundation.
 
+## Voice telephony
+
+`voice_start_outbound_call` starts an ElevenLabs Conversational AI outbound call over an imported SIP phone number. It is disabled unless `MCP_ALLOW_PAID_AI=true`, `MCP_ALLOW_OUTBOUND_CALLS=true`, the destination is in `VOICE_CALL_ALLOWED_NUMBERS`, and the individual call includes `confirm_call=true`. This is not yet a configured phone service: the ElevenLabs workspace needs an agent and a SIP number imported from a carrier/PBX first.
+
 ## Transcription
 
 `transcription_transcribe_audio_url` uses ElevenLabs Scribe v2 for call recordings, with optional speaker diarization, word timestamps, and audio-event tagging. It accepts only HTTPS URLs from `TRANSCRIPTION_ALLOWED_HOSTS`. Scribe v2 documents support for Russian (`rus`), Kyrgyz (`kir`), Kazakh (`kaz`), and Uzbek (`uzb`). Calls are disabled unless `MCP_ALLOW_PAID_AI=true`, and require an `ELEVENLABS_API_KEY`. Original transcript text is returned without automatic translation.
@@ -122,7 +130,7 @@ MCP tools `get_supported_languages` and `resolve_conversation_language` expose t
 
 ## Extended CRM coverage and boundaries
 
-The extended toolset covers CRM account data, leads, contacts, companies, tasks, pipelines, pipeline stages, custom fields, tags, catalogs, catalog elements, events, sources, webhooks, widgets, Salesbot, talks, chat templates, call logging, Amma agent lifecycle management, Chat API history/message tools, and Scribe v2 transcription.
+The extended toolset covers CRM account data, leads, contacts, companies, tasks, pipelines, pipeline stages, custom fields, tags, catalogs, catalog elements, events, sources, webhooks, widgets, Salesbot, talks, chat templates, call logging, Amma agent lifecycle management, Chat API history/message tools, Scribe v2 transcription, and guarded SIP outbound calls.
 
 Important platform boundaries:
 - The amoCRM REST Calls API records completed calls against CRM cards. It does **not** place or answer telephone calls. Actual telephony requires a provider/widget or a separate telephony API integration.
