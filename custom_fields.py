@@ -175,3 +175,50 @@ def ensure_custom_field_is_deletable(field: Mapping[str, Any], expected_field_id
             "amoCRM does not mark this custom field as deletable. "
             "Deleting a field permanently removes its values."
         )
+
+
+_GROUP_ID_PATTERN = __import__("re").compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def normalize_custom_field_group_id(group_id: str) -> str:
+    """Validate an amoCRM field-group ID as a single safe path segment."""
+    if not isinstance(group_id, str) or not _GROUP_ID_PATTERN.fullmatch(group_id):
+        raise ValueError("group_id must contain only letters, digits, underscore or hyphen")
+    return group_id
+
+
+def validate_custom_field_group_payload(payload: dict[str, Any], operation: str) -> dict[str, Any]:
+    """Validate the documented create/update properties for field groups."""
+    if operation not in {"create", "update"}:
+        raise ValueError("operation must be create or update")
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError("group payload must be a non-empty JSON object")
+    allowed = {"name", "sort"} if operation == "create" else {"name", "sort"}
+    unsupported = set(payload) - allowed
+    if unsupported:
+        raise ValueError("unsupported group properties: " + ", ".join(sorted(unsupported)))
+    if operation == "create" and "name" not in payload:
+        raise ValueError("name is required for group creation")
+    if "name" in payload and (not isinstance(payload["name"], str) or not payload["name"].strip()):
+        raise ValueError("name must be a non-empty string")
+    if operation == "create" and "sort" not in payload:
+        raise ValueError("sort is required for group creation")
+    if "sort" in payload and (
+        not isinstance(payload["sort"], int)
+        or isinstance(payload["sort"], bool)
+        or payload["sort"] < 0
+    ):
+        raise ValueError("sort must be a non-negative integer")
+    return dict(payload)
+
+
+def ensure_custom_field_group_is_deletable(group: Mapping[str, Any], expected_group_id: str) -> None:
+    """Fail closed for predefined/linked groups or mismatched response IDs."""
+    if normalize_custom_field_group_id(expected_group_id) != expected_group_id:
+        raise ValueError("invalid group_id")
+    if not isinstance(group, Mapping) or group.get("id") != expected_group_id:
+        raise PermissionError("amoCRM returned a different custom field group; refusing to delete")
+    if group.get("is_predefined") is not False or group.get("type") != "custom_field_group":
+        raise PermissionError(
+            "Only non-predefined custom_field_group groups can be deleted."
+        )
