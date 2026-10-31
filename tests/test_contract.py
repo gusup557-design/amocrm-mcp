@@ -57,6 +57,37 @@ class UpstreamToolPreservationTests(unittest.TestCase):
         self.assertIn("expected_resource", self.oauth_source)
         self.assertIn("resource=p.get(\"resource\")", self.oauth_source)
 
+    def test_legacy_mutation_tools_require_explicit_confirmation_parameters(self):
+        functions = {
+            node.name: node
+            for node in ast.walk(self.tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        expected = {
+            "create_lead": "confirm_write",
+            "update_lead": "confirm_write",
+            "create_contact": "confirm_write",
+            "create_company": "confirm_write",
+            "create_task": "confirm_write",
+            "add_note": "confirm_write",
+            "create_pipeline": "confirm_write",
+            "update_pipeline": "confirm_write",
+            "add_call_record": "confirm_write",
+            "create_webhook": "confirm_write",
+            "create_amma_agent": "confirm_write",
+            "update_amma_agent": "confirm_write",
+            "delete_amma_agent": "confirm_delete",
+            "delete_pipeline": "confirm_delete",
+            "chat_send_text_message": "confirm_send",
+        }
+        for function_name, confirmation_name in expected.items():
+            with self.subTest(function_name=function_name):
+                self.assertIn(function_name, functions)
+                argument_names = {arg.arg for arg in functions[function_name].args.args}
+                self.assertIn(confirmation_name, argument_names)
+                body = ast.get_source_segment(self.source, functions[function_name])
+                self.assertIn(confirmation_name, body)
+
     def test_entity_note_paths_are_allowlisted(self):
         self.assertGreaterEqual(self.source.count('entity_type not in {"leads", "contacts", "companies"}'), 2)
 
