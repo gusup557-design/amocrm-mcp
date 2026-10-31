@@ -33,12 +33,10 @@ def validate_audio_source_url(url: str, allowed_hosts: list[str]) -> str:
     hostname = parsed.hostname.lower().rstrip(".")
     try:
         ip = ipaddress.ip_address(hostname)
-        if not ip.is_global:
-            raise ValueError("Private or non-global audio source addresses are not allowed")
-    except ValueError as exc:
-        if "not allowed" in str(exc):
-            raise
-        # Hostname is not an IP address; continue with the configured allowlist.
+    except ValueError:
+        ip = None
+    if ip is not None and not ip.is_global:
+        raise ValueError("Private or non-global audio source addresses are not allowed")
     normalized_hosts = [h.strip().lower().rstrip(".") for h in allowed_hosts if h.strip()]
     if not any(hostname == host or hostname.endswith("." + host) for host in normalized_hosts):
         raise ValueError("Audio source host is not in TRANSCRIPTION_ALLOWED_HOSTS")
@@ -64,6 +62,7 @@ async def transcribe_source_url(
         "diarize": str(bool(diarize)).lower(),
         "tag_audio_events": str(bool(tag_audio_events)).lower(),
         "timestamps_granularity": "word",
+        "source_url": safe_url,
     }
     if language.strip():
         form["language_code"] = get_scribe_language_code(language)
@@ -75,7 +74,6 @@ async def transcribe_source_url(
             headers={"xi-api-key": api_key},
             data=form,
             params={"enable_logging": "true"},
-            json=None,
         )
         response.raise_for_status()
         result = response.json()
