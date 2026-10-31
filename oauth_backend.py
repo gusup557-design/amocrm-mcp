@@ -12,6 +12,7 @@ from mcp.server.auth.provider import (
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, PlainTextResponse
+from connection_lifecycle import ensure_no_other_active_account, select_single_active_connection
 
 BASE = "https://amocrm-mcp-ascan-006.vercel.app"
 AMO_REDIRECT = os.getenv("AMOCRM_REDIRECT_URI", BASE + "/oauth/callback")
@@ -142,9 +143,8 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
 provider = SupabaseOAuthProvider()
 
 async def amo_access_token():
-    rows=await db("GET","amocrm_connections",params={"select":"*","limit":"1"})
-    if not rows: raise RuntimeError("amoCRM is not connected. Open /connect first.")
-    row=rows[0]
+    rows=await db("GET","amocrm_connections",params={"select":"*","order":"account_id.asc","limit":"100"})
+    row=select_single_active_connection(rows)
     expiry=datetime.fromisoformat(row["expires_at"].replace("Z","+00:00"))
     if expiry > datetime.now(timezone.utc)+timedelta(minutes=3):
         return decrypt(row["access_token_enc"]), row["base_domain"]
@@ -237,6 +237,17 @@ def register_amo_routes(mcp):
             r.raise_for_status(); tok=r.json()
             a=await c.get(f"https://{domain}/api/v4/account",headers={"Authorization":"Bearer "+tok["access_token"]})
             a.raise_for_status(); account=a.json()
+        existing = await db("GET","amocrm_connections",params={"select":"account_id","limit":"100"})
+        try:
+            ensure_no_other_active_account(existing, account["id"])
+        except PermissionError:
+            await db("DELETE","amocrm_oauth_pending",params={"state":"eq."+state})
+            return HTMLResponse(
+                "<h2>Уже подключён другой аккаунт amoCRM.</h2>"
+                "<p>Сначала отключите предыдущий аккаунт в MCP, затем повторите подключение.</p>",
+                status_code=409,
+                headers={"Cache-Control":"no-store"},
+            )
         await db("POST","amocrm_connections",payload={"account_id":account["id"],"base_domain":domain,"client_id":pending["client_id"],"client_secret_enc":pending["client_secret_enc"],"access_token_enc":encrypt(tok["access_token"]),"refresh_token_enc":encrypt(tok["refresh_token"]),"expires_at":datetime.fromtimestamp(time.time()+int(tok["expires_in"]),timezone.utc).isoformat()},prefer="resolution=merge-duplicates,return=minimal")
         await db("DELETE","amocrm_oauth_pending",params={"state":"eq."+state})
         return HTMLResponse("<!doctype html><html><meta charset=utf-8><h2>amoCRM подключена</h2><p>Токены сохранены в зашифрованном виде. Можно закрыть это окно.</p></html>")
