@@ -50,6 +50,7 @@ from custom_fields import (
     validate_custom_field_payload,
 )
 from pipeline_statuses import ensure_pipeline_status_is_editable, validate_pipeline_status_payload
+from crm_mutations import validate_entity_update_payload, validate_task_update_payload
 
 # amoCRM account and API base domain are resolved from the active OAuth connection.
 
@@ -259,6 +260,68 @@ async def create_company(name: str) -> str:
 
 
 # ===================== ЗАДАЧИ =====================
+
+@mcp.tool()
+async def get_task(task_id: int) -> str:
+    """Получить задачу по ID, включая привязку и результат."""
+    if isinstance(task_id, bool) or task_id <= 0:
+        raise ValueError("task_id must be a positive integer")
+    return _dump(await api_get(f"/tasks/{task_id}"))
+
+
+@mcp.tool()
+async def update_task(
+    task_id: int,
+    task_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Изменить/перенести/завершить задачу. Требует confirm_write=true и MCP_ALLOW_WRITE=true."""
+    if isinstance(task_id, bool) or task_id <= 0:
+        raise ValueError("task_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the task update")
+    payload = validate_task_update_payload(_json_arg(task_json, dict))
+    current = await api_get(f"/tasks/{task_id}")
+    if current.get("id") != task_id:
+        raise RuntimeError("amoCRM returned a different task; refusing to update")
+    return _dump(await api_patch(f"/tasks/{task_id}", payload))
+
+
+@mcp.tool()
+async def update_contact(
+    contact_id: int,
+    contact_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Изменить контакт. Требует confirm_write=true, MCP_ALLOW_WRITE=true и прав на контакт."""
+    if isinstance(contact_id, bool) or contact_id <= 0:
+        raise ValueError("contact_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the contact update")
+    payload = validate_entity_update_payload("contacts", _json_arg(contact_json, dict))
+    current = await api_get(f"/contacts/{contact_id}")
+    if current.get("id") != contact_id:
+        raise RuntimeError("amoCRM returned a different contact; refusing to update")
+    return _dump(await api_patch(f"/contacts/{contact_id}", payload))
+
+
+@mcp.tool()
+async def update_company(
+    company_id: int,
+    company_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Изменить компанию. Требует confirm_write=true, MCP_ALLOW_WRITE=true и прав администратора."""
+    if isinstance(company_id, bool) or company_id <= 0:
+        raise ValueError("company_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the company update")
+    payload = validate_entity_update_payload("companies", _json_arg(company_json, dict))
+    current = await api_get(f"/companies/{company_id}")
+    if current.get("id") != company_id:
+        raise RuntimeError("amoCRM returned a different company; refusing to update")
+    return _dump(await api_patch(f"/companies/{company_id}", payload))
+
 
 @mcp.tool()
 async def get_tasks(page: int = 1, limit: int = 50, order_by: str = "updated_at", order_dir: str = "desc") -> str:
