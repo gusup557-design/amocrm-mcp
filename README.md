@@ -62,12 +62,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes 49 amoCRM MCP tools over MCP Streamable HTTP at:
+This repository exposes 53 amoCRM MCP tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 49 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 53 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -99,6 +99,17 @@ Supabase and encryption keys are server-only. The health endpoint checks connect
 - Secrets must be configured as sensitive Vercel environment variables and must never be committed.
 
 
+
+
+## Client provisioning and setup audit
+
+The server has no persistent customer profiles. The operator connects one customer amoCRM account at a time, runs a read-only audit and generates a setup plan, performs the manual provider-owner actions, tests the setup, hands the system back and disconnects the local MCP OAuth credentials.
+
+- `get_amocrm_setup_report` checks the account, pipelines, users, custom fields, lead sources, webhooks, widgets and catalogs. It returns counts/statuses rather than contact/customer records.
+- `get_client_setup_plan` generates an industry pipeline template and an ordered checklist for the selected telephony provider and channels. It stores nothing and performs no writes.
+- `get_provider_catalog` and `get_telephony_provider_guide` distinguish provider API availability from manual cabinet/PBX work. Zadarma, MANGO OFFICE and Asterisk are currently guide-only in this MCP; their provider API adapters are not yet implemented.
+- `validate_sip_endpoint_settings` validates hostname/IP, port and transport format only. It does not test network reachability, request SIP passwords or attempt registration.
+- `list_amocrm_connections` and `disconnect_amocrm_connection` support one connected account at a time. Disconnecting removes MCP-local OAuth material only; full app revocation must still be done in amoCRM.
 
 ## Operator connection lifecycle
 
