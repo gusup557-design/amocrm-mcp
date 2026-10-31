@@ -354,7 +354,7 @@ async def disconnect_amocrm_connection(account_id: int, confirm_disconnect: bool
         "amoCRM_integration_revoked": False,
         "manual_next_step": (
             "If access should be fully removed, uninstall or revoke this MCP integration "
-            in the customer's amoCRM account. Confirm any other client-owned integrations "
+            "in the customer's amoCRM account. Confirm any other client-owned integrations "
             "remain installed before handing the account back."
         ),
     })
