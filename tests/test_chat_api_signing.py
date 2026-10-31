@@ -13,7 +13,8 @@ class ChatApiSigningTests(unittest.TestCase):
             date_header="Sat, 31 Oct 2026 12:00:00 +0000",
         )
         self.assertEqual(headers["Content-Type"], "application/json")
-        self.assertEqual(headers["Content-MD5"], "f2a6b3f2b8c5b73a0f7b2b0f4c3a9a7d")
+        self.assertEqual(headers["Content-MD5"], "f28ac64419aed3b15e9cd5bee8e3f6cc")
+        self.assertEqual(headers["X-Signature"], "504683e870bb317e5dceecb771a1752390c2c3d9")
         self.assertEqual(len(headers["X-Signature"]), 40)
         self.assertEqual(headers["X-Signature"], headers["X-Signature"].lower())
 
