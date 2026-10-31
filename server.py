@@ -14,6 +14,8 @@ from language_support import SUPPORTED_LANGUAGES, get_language_profile, resolve_
 from chat_api import AmoChatApiClient
 from transcription import transcribe_source_url
 from voice_telephony import start_outbound_call
+from webhook_security import verify_amocrm_chat_signature, verify_elevenlabs_signature
+from webhook_events import build_webhook_event_identity
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -652,6 +654,82 @@ async def resolve_conversation_language(
         fallback_language=fallback_language or None,
     )
     return _dump(get_language_profile(resolved))
+
+
+@mcp.custom_route("/webhooks/amo-chat", methods=["POST"])
+async def receive_amocrm_chat_webhook(request: Request) -> JSONResponse:
+    """Authenticate and idempotently persist an amoCRM Chat API event."""
+    raw_body = await request.body()
+    if len(raw_body) > 262144:
+        return JSONResponse({"error": "payload_too_large"}, status_code=413)
+    secret = os.environ.get("AMOCHAT_CHANNEL_SECRET", "").strip()
+    signature = request.headers.get("X-Signature", "")
+    if not verify_amocrm_chat_signature(raw_body, signature, secret):
+        return JSONResponse({"error": "invalid_signature"}, status_code=401)
+    try:
+        payload = json.loads(raw_body)
+        provider_name, event_type, event_id, conversation_id = build_webhook_event_identity(
+            "amocrm_chat", payload, raw_body
+        )
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return JSONResponse({"error": "invalid_payload"}, status_code=400)
+    try:
+        await db(
+            "POST",
+            "communication_webhook_events",
+            params={"on_conflict": "provider,event_id"},
+            payload={
+                "provider": provider_name,
+                "event_id": event_id,
+                "event_type": event_type,
+                "conversation_id": conversation_id,
+                "raw_payload": payload,
+                "processing_status": "received",
+            },
+            prefer="resolution=ignore-duplicates,return=minimal",
+        )
+    except Exception:
+        return JSONResponse({"error": "event_persistence_failed"}, status_code=503)
+    return JSONResponse({"status": "accepted"})
+
+
+@mcp.custom_route("/webhooks/elevenlabs", methods=["POST"])
+async def receive_elevenlabs_webhook(request: Request) -> JSONResponse:
+    """Authenticate and idempotently persist ElevenLabs post-call events."""
+    raw_body = await request.body()
+    if len(raw_body) > 1048576:
+        return JSONResponse({"error": "payload_too_large"}, status_code=413)
+    secret = os.environ.get("ELEVENLABS_WEBHOOK_SECRET", "").strip()
+    signature = request.headers.get("ElevenLabs-Signature", "")
+    if not verify_elevenlabs_signature(raw_body, signature, secret):
+        return JSONResponse({"error": "invalid_signature"}, status_code=401)
+    try:
+        payload = json.loads(raw_body)
+        provider_name, event_type, event_id, conversation_id = build_webhook_event_identity(
+            "elevenlabs", payload, raw_body
+        )
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return JSONResponse({"error": "invalid_payload"}, status_code=400)
+    if event_type not in {"post_call_transcription", "call_initiation_failure"}:
+        return JSONResponse({"error": "unsupported_event_type"}, status_code=400)
+    try:
+        await db(
+            "POST",
+            "communication_webhook_events",
+            params={"on_conflict": "provider,event_id"},
+            payload={
+                "provider": provider_name,
+                "event_id": event_id,
+                "event_type": event_type,
+                "conversation_id": conversation_id,
+                "raw_payload": payload,
+                "processing_status": "received",
+            },
+            prefer="resolution=ignore-duplicates,return=minimal",
+        )
+    except Exception:
+        return JSONResponse({"error": "event_persistence_failed"}, status_code=503)
+    return JSONResponse({"status": "accepted"})
 
 
 @mcp.custom_route("/health", methods=["GET"])
