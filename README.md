@@ -18,6 +18,7 @@ MCP (Model Context Protocol) server for amoCRM integration with ChatGPT and othe
 - **Events** -- read CRM audit events
 - **Sources and webhooks** -- inspect channels and webhook subscriptions
 - **Calls** -- add completed call records to CRM cards (does not initiate calls)
+- **Conversation languages** -- RU/KY/KK/UZ locale profiles and deterministic language preference resolution
 - **Catalogs and tags** -- inspect catalog items and entity tags
 - **Widgets** -- inspect installed and available widgets
 - **Amma AI agents** -- list, inspect, create, update and delete integration-owned agents when the account and integration have the Amma scope
@@ -64,7 +65,7 @@ This repository exposes 40 amoCRM tools over MCP Streamable HTTP at:
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 40 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 42 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -100,7 +101,7 @@ Production MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - `MCP_ALLOW_WRITE` defaults to `false`. Original write tools remain present, but create/update/note operations are blocked unless the owner deliberately sets this variable to `true`.
 - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` must be available to the Vercel production runtime.
 
-## Extended CRM coverage and boundaries
+## Conversation language support\n\nMCP tools `get_supported_languages` and `resolve_conversation_language` expose the initial RU/KY/KK/UZ language contract. The resolver accepts short codes and locale tags, prioritizes an explicitly saved contact preference, then an STT/chat provider's detected language, then a configured fallback, and finally Russian. Detection, translation, transcription, and text-to-speech are separate provider integrations and are not enabled by this language foundation.\n\n## Extended CRM coverage and boundaries
 
 The extended toolset covers CRM account data, leads, contacts, companies, tasks, pipelines, pipeline stages, custom fields, tags, catalogs, catalog elements, events, sources, webhooks, widgets, Salesbot, talks, chat templates, call logging, and Amma agent lifecycle management.
 
