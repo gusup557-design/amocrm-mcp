@@ -30,7 +30,7 @@ class LanguageMcpToolContractTests(unittest.TestCase):
         )
 
     def test_original_tools_are_preserved_and_total_count_is_updated(self):
-        self.assertEqual(len(self.tools), 49)
+        self.assertEqual(len(self.tools), 53)
 
     def test_language_module_is_imported_by_server(self):
         self.assertIn("from language_support import", self.source)
