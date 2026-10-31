@@ -19,6 +19,7 @@ from webhook_events import build_webhook_event_identity
 from conversation_automation import build_post_call_action_plan
 from connection_lifecycle import ensure_disconnect_confirmation, public_connection_summaries
 from provisioning import build_client_setup_plan, get_provider_catalog as build_provider_catalog, validate_sip_endpoint
+from handover import build_client_handover_checklist
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -483,6 +484,13 @@ async def get_amocrm_setup_report() -> str:
             "Do not run paid calls or send external messages until the customer approves a test.",
         ],
     })
+
+
+@mcp.tool()
+async def get_client_handover_checklist(completed_checks_json: str = "[]") -> str:
+    """Проверить чек-лист передачи amoCRM/телефонии клиенту; отметки считаются подтверждениями оператора."""
+    completed = _json_arg(completed_checks_json, list)
+    return _dump(build_client_handover_checklist(completed))
 
 
 @mcp.tool()
