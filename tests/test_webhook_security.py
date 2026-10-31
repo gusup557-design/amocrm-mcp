@@ -73,6 +73,23 @@ class WebhookSecurityTests(unittest.TestCase):
             )
         )
 
+    def test_uses_documented_thirty_minute_timestamp_tolerance_by_default(self):
+        timestamp = "1793449000"
+        body = b"{}"
+        digest = hmac.new(
+            b"webhook-secret",
+            timestamp.encode("ascii") + b"." + body,
+            hashlib.sha256,
+        ).hexdigest()
+        self.assertTrue(
+            verify_elevenlabs_signature(
+                body,
+                f"t={timestamp},v0={digest}",
+                "webhook-secret",
+                now=1793450000,
+            )
+        )
+
     def test_rejects_old_or_future_elevenlabs_timestamps(self):
         timestamp = "1793440000"
         body = b"{}"
