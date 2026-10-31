@@ -62,12 +62,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes 46 amoCRM MCP tools over MCP Streamable HTTP at:
+This repository exposes 47 amoCRM MCP tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 46 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 47 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -130,7 +130,7 @@ MCP tools `get_supported_languages` and `resolve_conversation_language` expose t
 
 ## Extended CRM coverage and boundaries
 
-The extended toolset covers CRM account data, leads, contacts, companies, tasks, pipelines, pipeline stages, custom fields, tags, catalogs, catalog elements, events, sources, webhooks, widgets, Salesbot, talks, chat templates, call logging, Amma agent lifecycle management, Chat API history/message tools, Scribe v2 transcription, and guarded SIP outbound calls.
+The extended toolset covers CRM account data, leads, contacts, companies, tasks, pipelines, pipeline stages, custom fields, tags, catalogs, catalog elements, events, sources, webhooks, widgets, Salesbot, talks, chat templates, call logging, Amma agent lifecycle management, Chat API history/message tools, Scribe v2 transcription, guarded SIP outbound calls, and post-call CRM action preview.
 
 Important platform boundaries:
 - The amoCRM REST Calls API records completed calls against CRM cards. It does **not** place or answer telephone calls. Actual telephony requires a provider/widget or a separate telephony API integration.
@@ -160,4 +160,4 @@ Webhook URLs (only after the migration and secrets are configured):
 - `https://amocrm-mcp-ascan-006.vercel.app/webhooks/amo-chat`
 - `https://amocrm-mcp-ascan-006.vercel.app/webhooks/elevenlabs`
 
-The receivers currently acknowledge durable receipt only. They do not yet run automatic CRM updates, create tasks, change deal stages, send messages, or initiate calls. These actions require a separate idempotent processor with dry-run and approval controls. Raw webhook payloads may contain personal data and transcripts; define a retention period and deletion workflow before production use. amoCRM Chat API does not retry failed webhook delivery, so production enablement requires monitoring and reconciliation planning.
+The MCP tool `conversation_preview_post_call_actions(event_id)` reads a stored completed call and returns a deterministic, read-only proposal for a contact note and follow-up task. SIP calls can pass `crm_contact_id` and `preferred_language` as ElevenLabs dynamic variables so the post-call event can be correlated to the CRM contact. The preview tool does not execute CRM writes. Actual task/note creation, stage changes and outbound messages still require a separate idempotent executor with dry-run and explicit approval. Raw webhook payloads may contain personal data and transcripts; define a retention period and deletion workflow before production use. amoCRM Chat API does not retry failed webhook delivery, so production enablement requires monitoring and reconciliation planning.
