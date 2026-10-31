@@ -78,7 +78,7 @@ class AmoChatApiClient:
         params: Optional[dict[str, int]] = None,
     ) -> dict[str, Any]:
         method = method.upper()
-        if not path_suffix.startswith("/") or "?" in path_suffix or "#" in path_suffix:
+        if (path_suffix and not path_suffix.startswith("/")) or "?" in path_suffix or "#" in path_suffix:
             raise ValueError("Chat API path suffix must not contain query or fragment")
         path = f"/v2/origin/custom/{self.scope_id}{path_suffix}"
         body_bytes = (
