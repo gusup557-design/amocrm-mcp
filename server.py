@@ -19,6 +19,27 @@ from conversation_automation import build_post_call_action_plan
 from connection_lifecycle import ensure_disconnect_confirmation, public_connection_summaries
 from provisioning import build_client_setup_plan, get_provider_catalog as build_provider_catalog, validate_sip_endpoint
 from handover import build_client_handover_checklist
+import os
+import json
+import time
+import uuid
+import httpx
+from mcp.server.fastmcp import FastMCP
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from oauth_backend import provider, register_amo_routes, amo_access_token, db
+from language_support import SUPPORTED_LANGUAGES, get_language_profile, resolve_language
+from chat_api import AmoChatApiClient
+from transcription import transcribe_source_url
+from voice_telephony import start_outbound_call
+from webhook_security import verify_amocrm_chat_signature, verify_elevenlabs_signature
+from webhook_events import build_webhook_event_identity
+from conversation_automation import build_post_call_action_plan
+from connection_lifecycle import ensure_disconnect_confirmation, public_connection_summaries
+from provisioning import build_client_setup_plan, get_provider_catalog as build_provider_catalog, validate_sip_endpoint
+from handover import build_client_handover_checklist
 from custom_fields import (
     ensure_custom_field_group_is_deletable,
     ensure_custom_field_is_deletable,
@@ -28,6 +49,7 @@ from custom_fields import (
     validate_custom_field_group_payload,
     validate_custom_field_payload,
 )
+from pipeline_statuses import ensure_pipeline_status_is_editable, validate_pipeline_status_payload
 
 # amoCRM account and API base domain are resolved from the active OAuth connection.
 
@@ -681,6 +703,103 @@ async def get_sources() -> str:
 async def get_amma_agents(page: int = 1, limit: int = 50) -> str:
     """Получить список ИИ-агентов Аммы, созданных этой интеграцией. Нужен отдельный scope «Амма» и доступность Аммы на тарифе."""
     return _dump(await api_get("/amma/agents", {"page": page, "limit": min(max(limit, 1), 50)}))
+
+
+@mcp.tool()
+async def get_pipeline_statuses(pipeline_id: int, include_descriptions: bool = False) -> str:
+    """Получить все этапы воронки. Чтение, без изменения CRM."""
+    if isinstance(pipeline_id, bool) or pipeline_id <= 0:
+        raise ValueError("pipeline_id must be a positive integer")
+    params = {"with": "descriptions"} if include_descriptions else None
+    return _dump(await api_get(f"/leads/pipelines/{pipeline_id}/statuses", params))
+
+
+@mcp.tool()
+async def get_pipeline_status(
+    pipeline_id: int,
+    status_id: int,
+    include_descriptions: bool = False,
+) -> str:
+    """Получить конкретный этап воронки по ID."""
+    if isinstance(pipeline_id, bool) or pipeline_id <= 0:
+        raise ValueError("pipeline_id must be a positive integer")
+    if isinstance(status_id, bool) or status_id <= 0:
+        raise ValueError("status_id must be a positive integer")
+    params = {"with": "descriptions"} if include_descriptions else None
+    return _dump(await api_get(
+        f"/leads/pipelines/{pipeline_id}/statuses/{status_id}",
+        params,
+    ))
+
+
+@mcp.tool()
+async def create_pipeline_status(
+    pipeline_id: int,
+    status_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Создать этап воронки. Требует confirm_write=true, MCP_ALLOW_WRITE=true и прав администратора."""
+    if isinstance(pipeline_id, bool) or pipeline_id <= 0:
+        raise ValueError("pipeline_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the new pipeline status")
+    payload = validate_pipeline_status_payload(_json_arg(status_json, dict), "create")
+    return _dump(await api_post(
+        f"/leads/pipelines/{pipeline_id}/statuses",
+        [payload],
+    ))
+
+
+@mcp.tool()
+async def update_pipeline_status(
+    pipeline_id: int,
+    status_id: int,
+    status_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Изменить этап только после чтения и проверки is_editable=true; требует подтверждения и прав администратора."""
+    if isinstance(pipeline_id, bool) or pipeline_id <= 0:
+        raise ValueError("pipeline_id must be a positive integer")
+    if isinstance(status_id, bool) or status_id <= 0:
+        raise ValueError("status_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the pipeline status update")
+    payload = validate_pipeline_status_payload(_json_arg(status_json, dict), "update")
+    current = await api_get(f"/leads/pipelines/{pipeline_id}/statuses/{status_id}")
+    ensure_pipeline_status_is_editable(current, pipeline_id, status_id)
+    return _dump(await api_patch(
+        f"/leads/pipelines/{pipeline_id}/statuses/{status_id}",
+        payload,
+    ))
+
+
+@mcp.tool()
+async def delete_pipeline_status(
+    pipeline_id: int,
+    status_id: int,
+    confirm_delete: bool = False,
+    confirm_deal_reassignment: bool = False,
+) -> str:
+    """Удалить редактируемый этап; все сделки с него переместятся на первый этап. Нужны два подтверждения."""
+    if isinstance(pipeline_id, bool) or pipeline_id <= 0:
+        raise ValueError("pipeline_id must be a positive integer")
+    if isinstance(status_id, bool) or status_id <= 0:
+        raise ValueError("status_id must be a positive integer")
+    if confirm_delete is not True or confirm_deal_reassignment is not True:
+        raise PermissionError(
+            "Both confirm_delete=true and confirm_deal_reassignment=true are required. "
+            "amoCRM moves deals from this stage to the first stage when it is deleted."
+        )
+    current = await api_get(f"/leads/pipelines/{pipeline_id}/statuses/{status_id}")
+    ensure_pipeline_status_is_editable(current, pipeline_id, status_id)
+    result = await api_delete(f"/leads/pipelines/{pipeline_id}/statuses/{status_id}")
+    return _dump({
+        "pipeline_id": pipeline_id,
+        "status_id": status_id,
+        "deleted": True,
+        "deal_reassignment": "Deals from this status are moved to the first status in the pipeline by amoCRM.",
+        "api_result": result,
+    })
 
 
 @mcp.tool()
