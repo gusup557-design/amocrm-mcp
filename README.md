@@ -139,3 +139,25 @@ Important platform boundaries:
 - The public Amma Agents API manages agents connected to an MCP endpoint. It does not document a general endpoint to submit arbitrary prompts to amoCRM's internal Amma model and fetch its generated answer. The API has account availability and integration-scope requirements, and a maximum of two agents created by one integration and ten per account.
 - The external-integration OAuth button documents `crm` and `notifications` scopes. Amma's separate scope must be granted through the appropriate amoCRM integration setup; adding an undocumented scope to the button is not valid.
 - All CRM write tools remain disabled unless `MCP_ALLOW_WRITE=true` is deliberately enabled. Deleting pipelines, agents, widgets, webhooks or fields can be destructive. Field deletion also removes field values.
+
+
+## Communication webhook ingestion (preview branch)
+
+The communications layer now exposes two signed webhook receivers on the existing MCP HTTP app:
+
+- `POST /webhooks/amo-chat` — verifies the amoCRM Chat API `X-Signature` against the raw request body.
+- `POST /webhooks/elevenlabs` — verifies the `ElevenLabs-Signature` HMAC-SHA256 header, including its timestamp replay window.
+
+Both receivers validate the payload and persist it idempotently to `public.communication_webhook_events`. Duplicate events are ignored by the unique `(provider, event_id)` key. The inbox table is private: RLS is enabled, access is revoked from `anon` and `authenticated`, and only the server-side `service_role` is granted table access.
+
+Before enabling either webhook in an external account, apply the migration:
+`supabase/migrations/20261031230000_communication_webhook_events.sql`
+
+Required additional server-side environment variable:
+- `ELEVENLABS_WEBHOOK_SECRET` — HMAC secret from the ElevenLabs webhook configuration.
+
+Webhook URLs (only after the migration and secrets are configured):
+- `https://amocrm-mcp-ascan-006.vercel.app/webhooks/amo-chat`
+- `https://amocrm-mcp-ascan-006.vercel.app/webhooks/elevenlabs`
+
+The receivers currently acknowledge durable receipt only. They do not yet run automatic CRM updates, create tasks, change deal stages, send messages, or initiate calls. These actions require a separate idempotent processor with dry-run and approval controls. Raw webhook payloads may contain personal data and transcripts; define a retention period and deletion workflow before production use. amoCRM Chat API does not retry failed webhook delivery, so production enablement requires monitoring and reconciliation planning.
