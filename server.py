@@ -16,6 +16,7 @@ from transcription import transcribe_source_url
 from voice_telephony import start_outbound_call
 from webhook_security import verify_amocrm_chat_signature, verify_elevenlabs_signature
 from webhook_events import build_webhook_event_identity
+from conversation_automation import build_post_call_action_plan
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -656,6 +657,27 @@ async def resolve_conversation_language(
     return _dump(get_language_profile(resolved))
 
 
+@mcp.tool()
+async def conversation_preview_post_call_actions(event_id: str) -> str:
+    """Preview CRM note/task proposals from a stored completed voice call. Read-only; never mutates CRM."""
+    if not isinstance(event_id, str) or not event_id.strip():
+        raise ValueError("event_id is required")
+    rows = await db(
+        "GET",
+        "communication_webhook_events",
+        params={
+            "provider": "eq.elevenlabs",
+            "event_id": "eq." + event_id.strip(),
+            "select": "raw_payload,event_type,processing_status",
+            "limit": "1",
+        },
+    )
+    if not rows:
+        raise ValueError("Completed call event was not found")
+    payload = rows[0].get("raw_payload")
+    return _dump(build_post_call_action_plan(payload))
+
+
 @mcp.custom_route("/webhooks/amo-chat", methods=["POST"])
 async def receive_amocrm_chat_webhook(request: Request) -> JSONResponse:
     """Authenticate and idempotently persist an amoCRM Chat API event."""
@@ -765,7 +787,7 @@ async def health_check(request: Request) -> JSONResponse:
     return JSONResponse({
         "status": "ok",
         "service": "amoCRM MCP",
-        "tools": 46,
+        "tools": 47,
         "supabase": supabase_status,
         "amoCRM": amo_status,
     })
