@@ -9,7 +9,6 @@ from email.utils import format_datetime
 from typing import Any, Mapping, Optional
 from urllib.parse import quote
 
-import httpx
 
 _ALLOWED_METHODS = {"GET", "POST", "DELETE"}
 
@@ -87,6 +86,7 @@ class AmoChatApiClient:
             else b""
         )
         headers = build_chat_headers(method, path, body_bytes, self.secret)
+        import httpx
         async with httpx.AsyncClient(
             verify=True, timeout=self.timeout, follow_redirects=False
         ) as client:
