@@ -102,6 +102,46 @@ class CustomFieldPayloadTests(unittest.TestCase):
         self.assertEqual(result["enums"][0]["id"], 101)
         self.assertNotIn("id", result["enums"][1])
 
+    def test_group_ids_are_safe_path_segments(self):
+        from custom_fields import normalize_custom_field_group_id
+        self.assertEqual(normalize_custom_field_group_id("leads_123"), "leads_123")
+        for value in ("", "../groups", "a/b", "a\\\\b", None):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    normalize_custom_field_group_id(value)
+
+    def test_group_create_and_update_payload_validation(self):
+        from custom_fields import validate_custom_field_group_payload
+        self.assertEqual(
+            validate_custom_field_group_payload({"name": "Данные клиента", "sort": 4}, "create"),
+            {"name": "Данные клиента", "sort": 4},
+        )
+        self.assertEqual(
+            validate_custom_field_group_payload({"sort": 5}, "update),
+            {"sort": 5},
+        )
+        for payload in ({}, {"name": "x"}, {"name": "x", "sort": True}, {"name": "x", "sort": -1}):
+            with self.subTest(payload=payload):
+                with self.assertRaises(ValueError):
+                    validate_custom_field_group_payload(payload, "create")
+        with self.assertRaises(ValueError):
+            validate_custom_field_group_payload({"fields": [1]}, "update")
+
+    def test_group_delete_is_allowed_only_for_non_predefined_custom_field_group(self):
+        from custom_fields import ensure_custom_field_group_is_deletable
+        ensure_custom_field_group_is_deletable(
+            {"id": "leads_123", "is_predefined": False, "type": "custom_field_group"},
+            "leads_123",
+        )
+        for group in (
+            {"id": "default", "is_predefined": True, "type": "custom_field_group"},
+            {"id": "leads_123", "is_predefined": False, "type": "linked_group"},
+            {"id": "leads_123", "type": "custom_field_group"},
+        ):
+            with self.subTest(group=group):
+                with self.assertRaises(PermissionError):
+                    ensure_custom_field_group_is_deletable(group, "leads_123")
+
     def test_delete_requires_explicitly_deletable_field(self):
         ensure_custom_field_is_deletable({"id": 3, "is_deletable": True}, 3)
         for field in (
