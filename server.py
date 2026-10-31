@@ -1,6 +1,8 @@
 import os
 import json
 import re
+import time
+import uuid
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
@@ -9,6 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from oauth_backend import provider, register_amo_routes, amo_access_token, db
 from language_support import SUPPORTED_LANGUAGES, get_language_profile, resolve_language
+from chat_api import AmoChatApiClient
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -538,6 +541,67 @@ async def delete_pipeline(pipeline_id: int) -> str:
     if pipeline_id <= 0:
         raise ValueError("pipeline_id must be positive")
     return _dump(await api_delete(f"/leads/pipelines/{pipeline_id}"))
+
+
+def _chat_api_client() -> AmoChatApiClient:
+    return AmoChatApiClient(
+        scope_id=os.environ.get("AMOCHAT_SCOPE_ID", "").strip(),
+        secret=os.environ.get("AMOCHAT_CHANNEL_SECRET", "").strip(),
+        base_url=os.environ.get("AMOCHAT_BASE_URL", "https://amojo.amocrm.ru").strip(),
+    )
+
+
+@mcp.tool()
+async def chat_get_history(conversation_id: str, offset: int = 0, limit: int = 50) -> str:
+    """Получить историю сообщений чата через amoCRM Chat API. Нужны scope_id и секрет канала."""
+    data = await _chat_api_client().get_history(
+        conversation_id=conversation_id,
+        offset=offset,
+        limit=limit,
+    )
+    return _dump(data)
+
+
+@mcp.tool()
+async def chat_send_text_message(
+    conversation_id: str,
+    receiver_id: str,
+    receiver_name: str,
+    message_text: str,
+    silent: bool = False,
+) -> str:
+    """Отправить текстовое сообщение в чат amoCRM. Запись заблокирована, пока MCP_ALLOW_WRITE не установлен в true."""
+    if os.environ.get("MCP_ALLOW_WRITE", "false").lower() != "true":
+        raise PermissionError("Chat API write operations are disabled by default")
+    required = {
+        "AMOCHAT_BOT_CLIENT_ID": os.environ.get("AMOCHAT_BOT_CLIENT_ID", "").strip(),
+        "AMOCHAT_BOT_REF_ID": os.environ.get("AMOCHAT_BOT_REF_ID", "").strip(),
+        "AMOCHAT_BOT_NAME": os.environ.get("AMOCHAT_BOT_NAME", "").strip(),
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise RuntimeError("Missing Chat API bot configuration: " + ", ".join(missing))
+    if not conversation_id.strip() or not receiver_id.strip() or not receiver_name.strip() or not message_text.strip():
+        raise ValueError("conversation_id, receiver_id, receiver_name and message_text are required")
+    now = time.time()
+    payload = {
+        "event_type": "new_message",
+        "payload": {
+            "timestamp": int(now),
+            "msec_timestamp": int(now * 1000),
+            "msgid": "veb-" + str(uuid.uuid4()),
+            "conversation_id": conversation_id,
+            "sender": {
+                "id": required["AMOCHAT_BOT_CLIENT_ID"],
+                "name": required["AMOCHAT_BOT_NAME"],
+                "ref_id": required["AMOCHAT_BOT_REF_ID"],
+            },
+            "receiver": {"id": receiver_id, "name": receiver_name},
+            "message": {"type": "text", "text": message_text},
+            "silent": silent,
+        },
+    }
+    return _dump(await _chat_api_client().send_message(payload))
 
 
 @mcp.tool()
