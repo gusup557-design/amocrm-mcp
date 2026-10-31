@@ -20,9 +20,12 @@ from connection_lifecycle import ensure_disconnect_confirmation, public_connecti
 from provisioning import build_client_setup_plan, get_provider_catalog as build_provider_catalog, validate_sip_endpoint
 from handover import build_client_handover_checklist
 from custom_fields import (
+    ensure_custom_field_group_is_deletable,
     ensure_custom_field_is_deletable,
     normalize_custom_field_entity,
+    normalize_custom_field_group_id,
     preserve_enum_ids_for_update,
+    validate_custom_field_group_payload,
     validate_custom_field_payload,
 )
 
@@ -593,6 +596,71 @@ async def delete_custom_field(
         "entity_type": entity,
         "deleted": True,
         "warning": "amoCRM deletes the stored values of this custom field together with the field.",
+        "api_result": result,
+    })
+
+
+@mcp.tool()
+async def get_custom_field_groups(entity_type: str) -> str:
+    """Получить группы пользовательских полей сделок, контактов или компаний."""
+    entity = normalize_custom_field_entity(entity_type)
+    return _dump(await api_get(f"/{entity}/custom_fields/groups", {"limit": 250}))
+
+
+@mcp.tool()
+async def create_custom_field_group(
+    entity_type: str,
+    name: str,
+    sort: int,
+    confirm_write: bool = False,
+) -> str:
+    """Создать группу полей; требуется confirm_write=true, MCP_ALLOW_WRITE=true и права администратора."""
+    entity = normalize_custom_field_entity(entity_type)
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the group name and sort")
+    payload = validate_custom_field_group_payload({"name": name, "sort": sort}, "create")
+    return _dump(await api_post(f"/{entity}/custom_fields/groups", [payload]))
+
+
+@mcp.tool()
+async def update_custom_field_group(
+    entity_type: str,
+    group_id: str,
+    group_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Изменить название/сортировку группы. Перемещение полей отдельной операцией не включено."""
+    entity = normalize_custom_field_entity(entity_type)
+    group = normalize_custom_field_group_id(group_id)
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the group update")
+    payload = validate_custom_field_group_payload(_json_arg(group_json, dict), "update")
+    current = await api_get(f"/{entity}/custom_fields/groups/{group}")
+    if current.get("id") != group:
+        raise RuntimeError("amoCRM returned a different group; refusing to update")
+    if current.get("is_predefined") is True:
+        raise PermissionError("Predefined custom field groups are protected from MCP updates")
+    return _dump(await api_patch(f"/{entity}/custom_fields/groups/{group}", payload))
+
+
+@mcp.tool()
+async def delete_custom_field_group(
+    entity_type: str,
+    group_id: str,
+    confirm_delete: bool = False,
+) -> str:
+    """Удалить пользовательскую группу полей. Предустановленные и системные группы защищены."""
+    entity = normalize_custom_field_entity(entity_type)
+    group = normalize_custom_field_group_id(group_id)
+    if confirm_delete is not True:
+        raise PermissionError("Set confirm_delete=true after reviewing the group")
+    current = await api_get(f"/{entity}/custom_fields/groups/{group}")
+    ensure_custom_field_group_is_deletable(current, group)
+    result = await api_delete(f"/{entity}/custom_fields/groups/{group}")
+    return _dump({
+        "group_id": group,
+        "entity_type": entity,
+        "deleted": True,
         "api_result": result,
     })
 
