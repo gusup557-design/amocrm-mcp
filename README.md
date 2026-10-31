@@ -106,7 +106,9 @@ Production MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 
 ## Conversation language support
 
-MCP tools `get_supported_languages` and `resolve_conversation_language` expose the initial RU/KY/KK/UZ language contract. The resolver accepts short codes and locale tags, prioritizes an explicitly saved contact preference, then an STT/chat provider's detected language, then a configured fallback, and finally Russian. Detection, translation, transcription, and text-to-speech are separate provider integrations and are not enabled by this language foundation.\n\n## Chat API
+MCP tools `get_supported_languages` and `resolve_conversation_language` expose the initial RU/KY/KK/UZ language contract. The resolver accepts short codes and locale tags, prioritizes an explicitly saved contact preference, then an STT/chat provider's detected language, then a configured fallback, and finally Russian. Detection, translation, transcription, and text-to-speech are separate provider integrations and are not enabled by this language foundation.
+
+## Chat API
 
 `chat_get_history` reads message history and `chat_send_text_message` sends text messages through amoCRM Chat API. This is a separate signed API: it requires an amoCRM-registered channel, its `scope_id`, and channel secret. The MCP uses the documented `Date`, `Content-MD5`, and HMAC-SHA1 `X-Signature` headers. Outbound writes remain blocked unless `MCP_ALLOW_WRITE=true`. Channel registration must first be requested from amoCRM support; see the [official registration guide](https://www.amocrm.ru/developers/content/chats/chat-start).
 
