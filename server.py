@@ -627,11 +627,18 @@ async def transcription_transcribe_audio_url(
 
 
 @mcp.tool()
-async def voice_start_outbound_call(to_number: str, confirm_call: bool = False) -> str:
-    """Начать исходящий AI-звонок через ElevenLabs SIP. Требуются allowlist номера, включённые платные операции и явное confirm_call=true."""
+async def voice_start_outbound_call(
+    to_number: str,
+    confirm_call: bool = False,
+    crm_contact_id: int = 0,
+    preferred_language: str = "",
+) -> str:
+    """Начать исходящий AI-звонок через ElevenLabs SIP с необязательной CRM-корреляцией. Требуются allowlist номера, включённые платные операции и явное confirm_call=true."""
     result = await start_outbound_call(
         to_number=to_number,
         confirm_call=confirm_call,
+        crm_contact_id=crm_contact_id or None,
+        preferred_language=preferred_language,
     )
     return _dump(result)
 
