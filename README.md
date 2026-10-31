@@ -62,12 +62,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes 54 amoCRM MCP tools over MCP Streamable HTTP at:
+This repository exposes 55 amoCRM MCP tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 54 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 55 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -109,6 +109,9 @@ The server has no persistent customer profiles. The operator connects one custom
 - `get_client_setup_plan` generates an industry pipeline template and an ordered checklist for the selected telephony provider and channels. It stores nothing and performs no writes.
 - `get_provider_catalog` and `get_telephony_provider_guide` distinguish provider API availability from manual cabinet/PBX work. Zadarma, MANGO OFFICE and Asterisk are currently guide-only in this MCP; their provider API adapters are not yet implemented.
 - `validate_sip_endpoint_settings` validates hostname/IP, port and transport format only. It does not test network reachability, request SIP passwords or attempt registration.
+
+- `get_client_handover_checklist` checks owner access, customer-owned provider accounts, transferred keys, tested call/chat routes, webhooks, automations, billing, privacy disclosure and removal of MCP-local credentials. Entries are operator attestations, not independently verified facts.
+
 - `list_amocrm_connections` and `disconnect_amocrm_connection` support one connected account at a time. Disconnecting removes MCP-local OAuth material only; full app revocation must still be done in amoCRM.
 
 ## Operator connection lifecycle
