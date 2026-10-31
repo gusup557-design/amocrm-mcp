@@ -117,7 +117,7 @@ class CustomFieldPayloadTests(unittest.TestCase):
             {"name": "Данные клиента", "sort": 4},
         )
         self.assertEqual(
-            validate_custom_field_group_payload({"sort": 5}, "update),
+            validate_custom_field_group_payload({"sort": 5}, "update"),
             {"sort": 5},
         )
         for payload in ({}, {"name": "x"}, {"name": "x", "sort": True}, {"name": "x", "sort": -1}):
