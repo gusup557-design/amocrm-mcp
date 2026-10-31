@@ -18,7 +18,7 @@ from webhook_security import verify_amocrm_chat_signature, verify_elevenlabs_sig
 from webhook_events import build_webhook_event_identity
 from conversation_automation import build_post_call_action_plan
 from connection_lifecycle import ensure_disconnect_confirmation, public_connection_summaries
-from provisioning import build_client_setup_plan, get_provider_catalog, validate_sip_endpoint
+from provisioning import build_client_setup_plan, get_provider_catalog as build_provider_catalog, validate_sip_endpoint
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -364,13 +364,13 @@ async def disconnect_amocrm_connection(account_id: int, confirm_disconnect: bool
 @mcp.tool()
 async def get_provider_catalog() -> str:
     """Получить каталог телефонии и разделение API-возможностей и ручных действий."""
-    return _dump(get_provider_catalog())
+    return _dump(build_provider_catalog())
 
 
 @mcp.tool()
 async def get_telephony_provider_guide(provider: str) -> str:
     """Получить пошаговую инструкцию для конкретного SIP/телефонного провайдера."""
-    catalog = get_provider_catalog()
+    catalog = build_provider_catalog()
     if provider not in catalog:
         raise ValueError("Unsupported telephony provider")
     return _dump(catalog[provider])
