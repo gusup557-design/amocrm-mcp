@@ -62,12 +62,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes 53 amoCRM MCP tools over MCP Streamable HTTP at:
+This repository exposes 54 amoCRM MCP tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 53 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 54 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
