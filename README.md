@@ -62,12 +62,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes 47 amoCRM MCP tools over MCP Streamable HTTP at:
+This repository exposes 49 amoCRM MCP tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 47 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 49 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -98,6 +98,14 @@ Supabase and encryption keys are server-only. The health endpoint checks connect
 - Entity types used in note endpoints are allowlisted.
 - Secrets must be configured as sensitive Vercel environment variables and must never be committed.
 
+
+
+## Operator connection lifecycle
+
+- `list_amocrm_connections` shows the connected account IDs and domains only; it never returns OAuth tokens or client secrets.
+- `disconnect_amocrm_connection(account_id, confirm_disconnect=true)` removes only the MCP's stored OAuth credentials for that account.
+- The MCP refuses to operate when multiple amoCRM accounts are connected and refuses a new distinct account until the previous account is disconnected.
+- Disconnecting the MCP's local credentials does **not** uninstall or revoke the integration in amoCRM. The operator must separately remove or revoke the integration in the customer's amoCRM account when full access removal is required.
 
 ## Remote OAuth deployment
 
