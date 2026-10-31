@@ -8,6 +8,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from oauth_backend import provider, register_amo_routes, amo_access_token, db
+from language_support import SUPPORTED_LANGUAGES, get_language_profile, resolve_language
 
 # Конфигурация
 AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
@@ -537,6 +538,27 @@ async def delete_pipeline(pipeline_id: int) -> str:
     if pipeline_id <= 0:
         raise ValueError("pipeline_id must be positive")
     return _dump(await api_delete(f"/leads/pipelines/{pipeline_id}"))
+
+
+@mcp.tool()
+async def get_supported_languages() -> str:
+    """Получить языки диалогов V1: русский, кыргызский, казахский и узбекский."""
+    return _dump(list(SUPPORTED_LANGUAGES.values()))
+
+
+@mcp.tool()
+async def resolve_conversation_language(
+    preferred_language: str = "",
+    detected_language: str = "",
+    fallback_language: str = "",
+) -> str:
+    """Выбрать язык диалога: предпочтение контакта, распознанный язык, резервный язык, затем русский."""
+    resolved = resolve_language(
+        preferred_language=preferred_language or None,
+        detected_language=detected_language or None,
+        fallback_language=fallback_language or None,
+    )
+    return _dump(get_language_profile(resolved))
 
 
 @mcp.custom_route("/health", methods=["GET"])
