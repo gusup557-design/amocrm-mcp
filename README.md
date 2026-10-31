@@ -62,12 +62,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes 58 amoCRM MCP tools over MCP Streamable HTTP at:
+This repository exposes 62 amoCRM MCP tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 58 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 62 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -103,6 +103,13 @@ Supabase and encryption keys are server-only. The health endpoint checks connect
 
 
 ## Custom field management
+### Custom field groups
+
+- `get_custom_field_groups(entity_type)` lists field groups for leads, contacts and companies.
+- `create_custom_field_group(entity_type, name, sort, confirm_write=true)` creates a custom field group.
+- `update_custom_field_group(entity_type, group_id, group_json, confirm_write=true)` changes only the group name and sort. Moving fields is intentionally not exposed in this tool to avoid accidental reassignment.
+- `delete_custom_field_group(entity_type, group_id, confirm_delete=true)` deletes only groups that amoCRM explicitly marks as non-predefined `custom_field_group`; system/default and linked groups are protected. All mutations also require `MCP_ALLOW_WRITE=true` and administrator access.
+
 
 - `get_custom_fields(entity_type)` reads fields for leads, contacts and companies.
 - `create_custom_field(entity_type, field_json, confirm_write=true)` creates a field after validating the documented request shape.
