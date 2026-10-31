@@ -62,12 +62,12 @@ MIT
 
 ## Vercel deployment
 
-This repository exposes 62 amoCRM MCP tools over MCP Streamable HTTP at:
+This repository exposes 67 amoCRM MCP tools over MCP Streamable HTTP at:
 
 - MCP endpoint: `https://amocrm-mcp-ascan-006.vercel.app/mcp`
 - Health check: `https://amocrm-mcp-ascan-006.vercel.app/health`
 
-The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 62 tools; all 17 upstream tools remain present.
+The `server.py` ASGI application is used by Vercel's Python runtime. The original stdio entry point remains available for local clients. The MCP server currently exposes 67 tools; all 17 upstream tools remain present.
 
 ### Vercel environment variables
 
@@ -101,6 +101,14 @@ Supabase and encryption keys are server-only. The health endpoint checks connect
 
 
 
+
+
+## Pipeline status management
+
+- `get_pipeline_statuses(pipeline_id, include_descriptions=false)` and `get_pipeline_status(...)` read current stages and optional descriptions.
+- `create_pipeline_status(pipeline_id, status_json, confirm_write=true)` creates stages with a documented color palette and optional role-specific descriptions.
+- `update_pipeline_status(..., confirm_write=true)` performs a read-before-write check and changes only statuses that amoCRM returns as `is_editable=true`.
+- `delete_pipeline_status(..., confirm_delete=true, confirm_deal_reassignment=true)` requires two separate confirmations. amoCRM moves deals from a deleted stage to the pipeline's first stage. System stages are not editable and are blocked by preflight. All mutations also require `MCP_ALLOW_WRITE=true` and administrator rights.
 
 ## Custom field management
 ### Custom field groups
