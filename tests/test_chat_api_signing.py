@@ -34,7 +34,7 @@ class ChatApiSigningTests(unittest.TestCase):
             verify_chat_webhook_signature(
                 body,
                 "channel-secret",
-                "PLACEHOLDER",
+                "1808242be3be3a54577fa234f0f2bf2544f924fe",
             )
         )
 
