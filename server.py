@@ -1,6 +1,8 @@
 import os
 import json
 import re
+import time
+import uuid
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
@@ -8,13 +10,54 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from oauth_backend import provider, register_amo_routes, amo_access_token, db
+from language_support import SUPPORTED_LANGUAGES, get_language_profile, resolve_language
+from chat_api import AmoChatApiClient
+from transcription import transcribe_source_url
+from voice_telephony import start_outbound_call
+from webhook_security import verify_amocrm_chat_signature, verify_elevenlabs_signature
+from webhook_events import build_webhook_event_identity
+from conversation_automation import build_post_call_action_plan
+from connection_lifecycle import ensure_disconnect_confirmation, public_connection_summaries
+from oauth_backend import get_mcp_selection_identity, get_selected_amocrm_account_id, set_selected_amocrm_account
+from mcp_session_scope import McpSessionScopeMiddleware
+from provider_scope import ensure_global_provider_scope
+from provisioning import build_client_setup_plan, get_provider_catalog as build_provider_catalog, validate_sip_endpoint
+from handover import build_client_handover_checklist
+import os
+import json
+import time
+import uuid
+import httpx
+from mcp.server.fastmcp import FastMCP
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from oauth_backend import provider, register_amo_routes, amo_access_token, db
+from language_support import SUPPORTED_LANGUAGES, get_language_profile, resolve_language
+from chat_api import AmoChatApiClient
+from transcription import transcribe_source_url
+from voice_telephony import start_outbound_call
+from webhook_security import verify_amocrm_chat_signature, verify_elevenlabs_signature
+from webhook_events import build_webhook_event_identity
+from conversation_automation import build_post_call_action_plan
+from connection_lifecycle import ensure_disconnect_confirmation, public_connection_summaries
+from provisioning import build_client_setup_plan, get_provider_catalog as build_provider_catalog, validate_sip_endpoint
+from handover import build_client_handover_checklist
+from custom_fields import (
+    ensure_custom_field_group_is_deletable,
+    ensure_custom_field_is_deletable,
+    normalize_custom_field_entity,
+    normalize_custom_field_group_id,
+    preserve_enum_ids_for_update,
+    validate_custom_field_group_payload,
+    validate_custom_field_payload,
+)
+from pipeline_statuses import ensure_pipeline_status_is_editable, validate_pipeline_status_payload
+from crm_mutations import validate_entity_update_payload, validate_task_update_payload
+from crm_write_guard import require_explicit_confirmation
 
-# Конфигурация
-AMOCRM_DOMAIN = os.environ.get("AMOCRM_DOMAIN", "").strip()
-AMOCRM_TOKEN = os.environ.get("AMOCRM_TOKEN", "").strip()
-if AMOCRM_DOMAIN and not re.fullmatch(r"[A-Za-z0-9-]+", AMOCRM_DOMAIN):
-    raise RuntimeError("AMOCRM_DOMAIN must be a subdomain without protocol or path")
-BASE_URL = f"https://{AMOCRM_DOMAIN}.amocrm.ru/api/v4" if AMOCRM_DOMAIN else ""
+# amoCRM account and API base domain are resolved from the active OAuth connection.
 
 _vercel_hosts = {"amocrm-mcp-ascan-006.vercel.app", os.environ.get("VERCEL_URL", "").strip()}
 _allowed_hosts = []
@@ -39,6 +82,16 @@ mcp = FastMCP(
     auth=auth_settings,
     transport_security=TransportSecuritySettings(allowed_hosts=_allowed_hosts),
 )
+
+
+async def _require_single_account_for_global_provider_config(provider_name: str) -> None:
+    """Fail closed while a provider still relies on one process-global credential set."""
+    rows = await db(
+        "GET",
+        "amocrm_connections",
+        params={"select": "account_id", "limit": "2"},
+    )
+    ensure_global_provider_scope(len(rows), provider_name)
 
 
 async def get_headers():
@@ -128,8 +181,9 @@ async def get_lead(lead_id: int) -> str:
 
 
 @mcp.tool()
-async def create_lead(name: str, price: int = 0, status_id: int = 0, pipeline_id: int = 0) -> str:
-    """Создать новую сделку. name — название, price — бюджет, status_id — ID статуса, pipeline_id — ID воронки."""
+async def create_lead(name: str, price: int = 0, status_id: int = 0, pipeline_id: int = 0, confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Создать новую сделку. name — название, price — бюджет, status_id — ID статуса, pipeline_id — ID воронки."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     lead = {"name": name}
     if price:
         lead["price"] = price
@@ -142,8 +196,9 @@ async def create_lead(name: str, price: int = 0, status_id: int = 0, pipeline_id
 
 
 @mcp.tool()
-async def update_lead(lead_id: int, name: str = "", price: int = -1, status_id: int = 0) -> str:
-    """Обновить сделку. lead_id — ID сделки, остальные поля — что обновить."""
+async def update_lead(lead_id: int, name: str = "", price: int = -1, status_id: int = 0, confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Обновить сделку. lead_id — ID сделки, остальные поля — что обновить."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     lead = {"id": lead_id}
     if name:
         lead["name"] = name
@@ -177,8 +232,9 @@ async def get_contact(contact_id: int) -> str:
 
 
 @mcp.tool()
-async def create_contact(first_name: str, last_name: str = "", phone: str = "", email: str = "") -> str:
-    """Создать контакт. first_name — имя, last_name — фамилия, phone — телефон, email — email."""
+async def create_contact(first_name: str, last_name: str = "", phone: str = "", email: str = "", confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Создать контакт. first_name — имя, last_name — фамилия, phone — телефон, email — email."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     contact = {"first_name": first_name}
     if last_name:
         contact["last_name"] = last_name
@@ -215,13 +271,76 @@ async def get_company(company_id: int) -> str:
 
 
 @mcp.tool()
-async def create_company(name: str) -> str:
-    """Создать компанию. name — название компании."""
+async def create_company(name: str, confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Создать компанию. name — название компании."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     data = await api_post("/companies", [{"name": name}])
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 # ===================== ЗАДАЧИ =====================
+
+@mcp.tool()
+async def get_task(task_id: int) -> str:
+    """Получить задачу по ID, включая привязку и результат."""
+    if isinstance(task_id, bool) or task_id <= 0:
+        raise ValueError("task_id must be a positive integer")
+    return _dump(await api_get(f"/tasks/{task_id}"))
+
+
+@mcp.tool()
+async def update_task(
+    task_id: int,
+    task_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Изменить/перенести/завершить задачу. Требует confirm_write=true и MCP_ALLOW_WRITE=true."""
+    if isinstance(task_id, bool) or task_id <= 0:
+        raise ValueError("task_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the task update")
+    payload = validate_task_update_payload(_json_arg(task_json, dict))
+    current = await api_get(f"/tasks/{task_id}")
+    if current.get("id") != task_id:
+        raise RuntimeError("amoCRM returned a different task; refusing to update")
+    return _dump(await api_patch(f"/tasks/{task_id}", payload))
+
+
+@mcp.tool()
+async def update_contact(
+    contact_id: int,
+    contact_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Изменить контакт. Требует confirm_write=true, MCP_ALLOW_WRITE=true и прав на контакт."""
+    if isinstance(contact_id, bool) or contact_id <= 0:
+        raise ValueError("contact_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the contact update")
+    payload = validate_entity_update_payload("contacts", _json_arg(contact_json, dict))
+    current = await api_get(f"/contacts/{contact_id}")
+    if current.get("id") != contact_id:
+        raise RuntimeError("amoCRM returned a different contact; refusing to update")
+    return _dump(await api_patch(f"/contacts/{contact_id}", payload))
+
+
+@mcp.tool()
+async def update_company(
+    company_id: int,
+    company_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Изменить компанию. Требует confirm_write=true, MCP_ALLOW_WRITE=true и прав администратора."""
+    if isinstance(company_id, bool) or company_id <= 0:
+        raise ValueError("company_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the company update")
+    payload = validate_entity_update_payload("companies", _json_arg(company_json, dict))
+    current = await api_get(f"/companies/{company_id}")
+    if current.get("id") != company_id:
+        raise RuntimeError("amoCRM returned a different company; refusing to update")
+    return _dump(await api_patch(f"/companies/{company_id}", payload))
+
 
 @mcp.tool()
 async def get_tasks(page: int = 1, limit: int = 50, order_by: str = "updated_at", order_dir: str = "desc") -> str:
@@ -234,8 +353,9 @@ async def get_tasks(page: int = 1, limit: int = 50, order_by: str = "updated_at"
 
 
 @mcp.tool()
-async def create_task(text: str, complete_till: int, entity_id: int = 0, entity_type: str = "leads", task_type_id: int = 1) -> str:
-    """Создать задачу. text — текст, complete_till — дедлайн (unix timestamp), entity_id — ID привязанной сущности, entity_type — тип (leads/contacts/companies), task_type_id — тип задачи (1=звонок, 2=встреча, 3=письмо)."""
+async def create_task(text: str, complete_till: int, entity_id: int = 0, entity_type: str = "leads", task_type_id: int = 1, confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Создать задачу. text — текст, complete_till — дедлайн (unix timestamp), entity_id — ID привязанной сущности, entity_type — тип (leads/contacts/companies), task_type_id — тип задачи (1=звонок, 2=встреча, 3=письмо)."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     task = {
         "text": text,
         "complete_till": complete_till,
@@ -269,8 +389,9 @@ async def get_users() -> str:
 # ===================== ПРИМЕЧАНИЯ =====================
 
 @mcp.tool()
-async def add_note(entity_type: str, entity_id: int, text: str) -> str:
-    """Добавить примечание к сущности. entity_type — leads/contacts/companies, entity_id — ID сущности, text — текст примечания."""
+async def add_note(entity_type: str, entity_id: int, text: str, confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Добавить примечание к сущности. entity_type — leads/contacts/companies, entity_id — ID сущности, text — текст примечания."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     if entity_type not in {"leads", "contacts", "companies"}:
         raise ValueError("entity_type must be leads, contacts, or companies")
     if entity_id <= 0:
@@ -307,6 +428,258 @@ def _json_arg(value: str, expected_type):
     if not isinstance(parsed, expected_type):
         raise ValueError("JSON имеет неверный тип")
     return parsed
+
+
+@mcp.tool()
+async def list_amocrm_connections() -> str:
+    """Показать постоянный каталог подключённых аккаунтов amoCRM без токенов и секретов.
+
+    Аккаунты остаются подключёнными до ручного отключения. Дата окончания гарантии
+    отображается только как справочная информация и не отключает доступ.
+    """
+    rows = await db(
+        "GET",
+        "amocrm_connections",
+        params={
+            "select": "account_id,account_name,base_domain,expires_at,created_at,guarantee_until",
+            "order": "created_at.desc",
+            "limit": "100",
+        },
+    )
+    selected_account_id = None
+    try:
+        selected_account_id = await get_selected_amocrm_account_id()
+    except RuntimeError:
+        # The catalogue may still be displayed; account selection requires an authenticated MCP session.
+        pass
+    accounts = public_connection_summaries(rows, selected_account_id)
+    return _dump({
+        "connected_accounts": accounts,
+        "account_count": len(accounts),
+        "selection_scope": "this MCP Streamable HTTP session only",
+        "automatic_disconnect": False,
+        "retention_policy": "kept until disconnect_amocrm_connection is called explicitly",
+        "guarantee_policy": "guarantee_until is informational only; it is not an account expiry date",
+    })
+
+
+@mcp.tool()
+async def select_amocrm_account(account_id: int) -> str:
+    """Выбрать аккаунт amoCRM только для текущей MCP-сессии.
+
+    Выбор не влияет на другие чаты или параллельные MCP-сессии.
+    """
+    account = await set_selected_amocrm_account(account_id)
+    return _dump({
+        "selected_account": {
+            "account_id": account["account_id"],
+            "account_name": account.get("account_name") or "",
+            "base_domain": account["base_domain"],
+        },
+        "selection_scope": "current MCP session only",
+        "other_sessions_unchanged": True,
+    })
+
+
+@mcp.tool()
+async def get_selected_amocrm_account() -> str:
+    """Показать аккаунт, выбранный в текущей MCP-сессии, не переключая другие сессии."""
+    rows = await db(
+        "GET",
+        "amocrm_connections",
+        params={"select": "account_id,account_name,base_domain,guarantee_until", "order": "created_at.desc", "limit": "100"},
+    )
+    selected_id = await get_selected_amocrm_account_id()
+    if selected_id is None and len(rows) == 1:
+        account = await set_selected_amocrm_account(int(rows[0]["account_id"]))
+        selected_id = int(account["account_id"])
+    if selected_id is None:
+        return _dump({
+            "selected_account": None,
+            "selection_required": len(rows) > 1,
+            "message": (
+                "Select an account with select_amocrm_account(account_id) before using CRM tools."
+                if len(rows) > 1 else "No amoCRM account is connected."
+            ),
+        })
+    selected = next((row for row in rows if int(row["account_id"]) == selected_id), None)
+    if selected is None:
+        return _dump({
+            "selected_account": None,
+            "selection_required": True,
+            "message": "The selected account is no longer connected. Select another account.",
+        })
+    return _dump({
+        "selected_account": {
+            "account_id": selected["account_id"],
+            "account_name": selected.get("account_name") or "",
+            "base_domain": selected["base_domain"],
+            "guarantee_until": selected.get("guarantee_until"),
+        },
+        "selection_scope": "current MCP session only",
+    })
+
+
+@mcp.tool()
+async def disconnect_amocrm_connection(account_id: int, confirm_disconnect: bool = False) -> str:
+    """Вручную удалить локальные OAuth-данные аккаунта из каталога MCP.
+
+    Никакого автоматического отключения через 7 дней нет. Интеграцию в amoCRM
+    нужно отдельно отозвать из кабинета клиента, если требуется полный отзыв доступа.
+    """
+    if isinstance(account_id, bool) or not isinstance(account_id, int) or account_id <= 0:
+        raise ValueError("account_id must be a positive integer")
+    ensure_disconnect_confirmation(confirm_disconnect)
+    deleted = await db(
+        "DELETE",
+        "amocrm_connections",
+        params={"account_id": "eq." + str(account_id)},
+        prefer="return=representation",
+    )
+    if not deleted:
+        raise LookupError("No MCP connection found for the supplied account_id")
+    return _dump({
+        "account_id": account_id,
+        "mcp_oauth_credentials_removed": True,
+        "session_selections_cleared": True,
+        "amoCRM_integration_revoked": False,
+        "manual_next_step": (
+            "If full access removal is required, uninstall or revoke this MCP integration "
+            "in the customer's amoCRM account. Client-owned telephony, AI and chat integrations "
+            "must remain enabled when the customer still needs them."
+        ),
+    })
+
+
+@mcp.tool()
+async def get_provider_catalog() -> str:
+    """Получить каталог телефонии и разделение API-возможностей и ручных действий."""
+    return _dump(build_provider_catalog())
+
+
+@mcp.tool()
+async def get_telephony_provider_guide(provider: str) -> str:
+    """Получить пошаговую инструкцию для конкретного SIP/телефонного провайдера."""
+    catalog = build_provider_catalog()
+    if provider not in catalog:
+        raise ValueError("Unsupported telephony provider")
+    return _dump(catalog[provider])
+
+
+@mcp.tool()
+async def get_client_setup_plan(
+    business_type: str,
+    telephony_provider: str,
+    requested_channels_json: str = "[]",
+) -> str:
+    """Сформировать план настройки клиента без сохранения профиля и без изменения сервисов."""
+    channels = _json_arg(requested_channels_json, list)
+    return _dump(build_client_setup_plan(
+        business_type=business_type,
+        telephony_provider=telephony_provider,
+        requested_channels=channels,
+    ))
+
+
+@mcp.tool()
+async def validate_sip_endpoint_settings(host: str, port: int, transport: str) -> str:
+    """Проверить формат SIP-хоста, порта и транспорта; проверка не соединяется с сервером."""
+    return _dump(validate_sip_endpoint(host, port, transport))
+
+
+@mcp.tool()
+async def get_amocrm_setup_report() -> str:
+    """Провести read-only аудит подключённой amoCRM: аккаунт, воронки, пользователи, поля, вебхуки и каналы."""
+    connections = await db(
+        "GET",
+        "amocrm_connections",
+        params={"select": "account_id,base_domain,expires_at", "order": "account_id.asc", "limit": "100"},
+    )
+    safe_connections = public_connection_summaries(connections)
+    if not safe_connections:
+        return _dump({
+            "status": "not_connected",
+            "message": "Connect one customer account through /connect first.",
+            "checks": {},
+            "writes_performed": False,
+        })
+    if len(safe_connections) != 1:
+        return _dump({
+            "status": "ambiguous_connection",
+            "connected_accounts": safe_connections,
+            "message": "Disconnect all but one account before running the CRM audit.",
+            "checks": {},
+            "writes_performed": False,
+        })
+
+    account_data = None
+    checks = {}
+
+    async def inspect(name: str, path: str, params: dict | None = None) -> None:
+        try:
+            data = await api_get(path, params)
+            if name == "account":
+                account = data.get("account", data) if isinstance(data, dict) else {}
+                checks[name] = {"status": "ok"}
+                nonlocal account_data
+                account_data = {
+                    key: account[key]
+                    for key in ("id", "name", "subdomain", "currency", "timezone")
+                    if isinstance(account, dict) and key in account
+                }
+                return
+            total = data.get("_total_items") if isinstance(data, dict) else None
+            embedded = data.get("_embedded", {}) if isinstance(data, dict) else {}
+            if not isinstance(total, int):
+                arrays = [value for value in embedded.values() if isinstance(value, list)] if isinstance(embedded, dict) else []
+                total = len(arrays[0]) if arrays else 0
+            checks[name] = {"status": "ok", "count": total}
+        except Exception as exc:
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            checks[name] = {
+                "status": "error",
+                "error_type": type(exc).__name__,
+                "http_status": status_code,
+            }
+
+    audits = [
+        ("account", "/account", {"with": "amojo_id,amojo_rights,users_groups,task_types,version,entity_names,datetime_settings"}),
+        ("pipelines", "/leads/pipelines", {"limit": 250}),
+        ("users", "/users", {"limit": 250}),
+        ("lead_fields", "/leads/custom_fields", {"limit": 250}),
+        ("contact_fields", "/contacts/custom_fields", {"limit": 250}),
+        ("company_fields", "/companies/custom_fields", {"limit": 250}),
+        ("sources", "/sources", {"limit": 250}),
+        ("webhooks", "/webhooks", {"limit": 100}),
+        ("widgets", "/widgets", {"limit": 250}),
+        ("catalogs", "/catalogs", {"limit": 250}),
+    ]
+    for name, path, params in audits:
+        await inspect(name, path, params)
+
+    successful = sum(1 for value in checks.values() if value["status"] == "ok")
+    failed = len(checks) - successful
+    return _dump({
+        "status": "ready_for_review" if failed == 0 else "needs_attention",
+        "connected_account": safe_connections[0],
+        "account": account_data,
+        "checks": checks,
+        "summary": {"passed": successful, "failed": failed, "total": len(checks)},
+        "write_mode_enabled": os.environ.get("MCP_ALLOW_WRITE", "false").lower() == "true",
+        "writes_performed": False,
+        "manual_follow_up": [
+            "Confirm provider and channel ownership with the customer.",
+            "Inspect API permissions and account-specific feature availability.",
+            "Do not run paid calls or send external messages until the customer approves a test.",
+        ],
+    })
+
+
+@mcp.tool()
+async def get_client_handover_checklist(completed_checks_json: str = "[]") -> str:
+    """Проверить чек-лист передачи amoCRM/телефонии клиенту; отметки считаются подтверждениями оператора."""
+    completed = _json_arg(completed_checks_json, list)
+    return _dump(build_client_handover_checklist(completed))
 
 
 @mcp.tool()
@@ -347,9 +720,135 @@ async def get_talk(talk_id: int) -> str:
 @mcp.tool()
 async def get_custom_fields(entity_type: str) -> str:
     """Получить пользовательские поля leads, contacts или companies."""
-    if entity_type not in {"leads", "contacts", "companies"}:
-        raise ValueError("entity_type must be leads, contacts, or companies")
-    return _dump(await api_get(f"/{entity_type}/custom_fields", {"limit": 250}))
+    entity = normalize_custom_field_entity(entity_type)
+    return _dump(await api_get(f"/{entity}/custom_fields", {"limit": 250}))
+
+
+@mcp.tool()
+async def create_custom_field(
+    entity_type: str,
+    field_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Создать пользовательское поле. Требует confirm_write=true, MCP_ALLOW_WRITE=true и прав администратора."""
+    entity = normalize_custom_field_entity(entity_type)
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the custom field definition")
+    payload = validate_custom_field_payload(_json_arg(field_json, dict), "create")
+    return _dump(await api_post(f"/{entity}/custom_fields", [payload]))
+
+
+@mcp.tool()
+async def update_custom_field(
+    entity_type: str,
+    field_id: int,
+    field_json: str,
+    confirm_write: bool = False,
+    confirm_enum_changes: bool = False,
+) -> str:
+    """Изменить поле. Требует явного подтверждения; замена списка вариантов требует confirm_enum_changes=true."""
+    entity = normalize_custom_field_entity(entity_type)
+    if isinstance(field_id, bool) or field_id <= 0:
+        raise ValueError("field_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the custom field update")
+    payload = validate_custom_field_payload(_json_arg(field_json, dict), "update")
+    current = await api_get(f"/{entity}/custom_fields/{field_id}")
+    if current.get("id") != field_id:
+        raise RuntimeError("amoCRM returned a different custom field; refusing to update")
+    if current.get("is_predefined") is True:
+        raise PermissionError("Predefined custom fields are protected from MCP updates")
+    payload = preserve_enum_ids_for_update(current, payload, confirm_enum_changes)
+    return _dump(await api_patch(f"/{entity}/custom_fields/{field_id}", payload))
+
+
+@mcp.tool()
+async def delete_custom_field(
+    entity_type: str,
+    field_id: int,
+    confirm_delete: bool = False,
+) -> str:
+    """Удалить поле только при is_deletable=true; значения поля в CRM будут удалены безвозвратно."""
+    entity = normalize_custom_field_entity(entity_type)
+    if isinstance(field_id, bool) or field_id <= 0:
+        raise ValueError("field_id must be a positive integer")
+    if confirm_delete is not True:
+        raise PermissionError("Set confirm_delete=true after reviewing the field and its stored values")
+    current = await api_get(f"/{entity}/custom_fields/{field_id}")
+    ensure_custom_field_is_deletable(current, field_id)
+    result = await api_delete(f"/{entity}/custom_fields/{field_id}")
+    return _dump({
+        "field_id": field_id,
+        "entity_type": entity,
+        "deleted": True,
+        "warning": "amoCRM deletes the stored values of this custom field together with the field.",
+        "api_result": result,
+    })
+
+
+@mcp.tool()
+async def get_custom_field_groups(entity_type: str) -> str:
+    """Получить группы пользовательских полей сделок, контактов или компаний."""
+    entity = normalize_custom_field_entity(entity_type)
+    return _dump(await api_get(f"/{entity}/custom_fields/groups", {"limit": 250}))
+
+
+@mcp.tool()
+async def create_custom_field_group(
+    entity_type: str,
+    name: str,
+    sort: int,
+    confirm_write: bool = False,
+) -> str:
+    """Создать группу полей; требуется confirm_write=true, MCP_ALLOW_WRITE=true и права администратора."""
+    entity = normalize_custom_field_entity(entity_type)
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the group name and sort")
+    payload = validate_custom_field_group_payload({"name": name, "sort": sort}, "create")
+    return _dump(await api_post(f"/{entity}/custom_fields/groups", [payload]))
+
+
+@mcp.tool()
+async def update_custom_field_group(
+    entity_type: str,
+    group_id: str,
+    group_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Изменить название/сортировку группы. Перемещение полей отдельной операцией не включено."""
+    entity = normalize_custom_field_entity(entity_type)
+    group = normalize_custom_field_group_id(group_id)
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the group update")
+    payload = validate_custom_field_group_payload(_json_arg(group_json, dict), "update")
+    current = await api_get(f"/{entity}/custom_fields/groups/{group}")
+    if current.get("id") != group:
+        raise RuntimeError("amoCRM returned a different group; refusing to update")
+    if current.get("is_predefined") is True:
+        raise PermissionError("Predefined custom field groups are protected from MCP updates")
+    return _dump(await api_patch(f"/{entity}/custom_fields/groups/{group}", payload))
+
+
+@mcp.tool()
+async def delete_custom_field_group(
+    entity_type: str,
+    group_id: str,
+    confirm_delete: bool = False,
+) -> str:
+    """Удалить пользовательскую группу полей. Предустановленные и системные группы защищены."""
+    entity = normalize_custom_field_entity(entity_type)
+    group = normalize_custom_field_group_id(group_id)
+    if confirm_delete is not True:
+        raise PermissionError("Set confirm_delete=true after reviewing the group")
+    current = await api_get(f"/{entity}/custom_fields/groups/{group}")
+    ensure_custom_field_group_is_deletable(current, group)
+    result = await api_delete(f"/{entity}/custom_fields/groups/{group}")
+    return _dump({
+        "group_id": group,
+        "entity_type": entity,
+        "deleted": True,
+        "api_result": result,
+    })
 
 
 @mcp.tool()
@@ -371,8 +870,106 @@ async def get_amma_agents(page: int = 1, limit: int = 50) -> str:
 
 
 @mcp.tool()
-async def create_pipeline(name: str, statuses_json: str = "[]") -> str:
-    """Создать воронку с этапами. Изменяет CRM; требует MCP_ALLOW_WRITE=true и прав администратора. statuses_json — JSON-массив объектов этапов."""
+async def get_pipeline_statuses(pipeline_id: int, include_descriptions: bool = False) -> str:
+    """Получить все этапы воронки. Чтение, без изменения CRM."""
+    if isinstance(pipeline_id, bool) or pipeline_id <= 0:
+        raise ValueError("pipeline_id must be a positive integer")
+    params = {"with": "descriptions"} if include_descriptions else None
+    return _dump(await api_get(f"/leads/pipelines/{pipeline_id}/statuses", params))
+
+
+@mcp.tool()
+async def get_pipeline_status(
+    pipeline_id: int,
+    status_id: int,
+    include_descriptions: bool = False,
+) -> str:
+    """Получить конкретный этап воронки по ID."""
+    if isinstance(pipeline_id, bool) or pipeline_id <= 0:
+        raise ValueError("pipeline_id must be a positive integer")
+    if isinstance(status_id, bool) or status_id <= 0:
+        raise ValueError("status_id must be a positive integer")
+    params = {"with": "descriptions"} if include_descriptions else None
+    return _dump(await api_get(
+        f"/leads/pipelines/{pipeline_id}/statuses/{status_id}",
+        params,
+    ))
+
+
+@mcp.tool()
+async def create_pipeline_status(
+    pipeline_id: int,
+    status_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Создать этап воронки. Требует confirm_write=true, MCP_ALLOW_WRITE=true и прав администратора."""
+    if isinstance(pipeline_id, bool) or pipeline_id <= 0:
+        raise ValueError("pipeline_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the new pipeline status")
+    payload = validate_pipeline_status_payload(_json_arg(status_json, dict), "create")
+    return _dump(await api_post(
+        f"/leads/pipelines/{pipeline_id}/statuses",
+        [payload],
+    ))
+
+
+@mcp.tool()
+async def update_pipeline_status(
+    pipeline_id: int,
+    status_id: int,
+    status_json: str,
+    confirm_write: bool = False,
+) -> str:
+    """Изменить этап только после чтения и проверки is_editable=true; требует подтверждения и прав администратора."""
+    if isinstance(pipeline_id, bool) or pipeline_id <= 0:
+        raise ValueError("pipeline_id must be a positive integer")
+    if isinstance(status_id, bool) or status_id <= 0:
+        raise ValueError("status_id must be a positive integer")
+    if confirm_write is not True:
+        raise PermissionError("Set confirm_write=true after reviewing the pipeline status update")
+    payload = validate_pipeline_status_payload(_json_arg(status_json, dict), "update")
+    current = await api_get(f"/leads/pipelines/{pipeline_id}/statuses/{status_id}")
+    ensure_pipeline_status_is_editable(current, pipeline_id, status_id)
+    return _dump(await api_patch(
+        f"/leads/pipelines/{pipeline_id}/statuses/{status_id}",
+        payload,
+    ))
+
+
+@mcp.tool()
+async def delete_pipeline_status(
+    pipeline_id: int,
+    status_id: int,
+    confirm_delete: bool = False,
+    confirm_deal_reassignment: bool = False,
+) -> str:
+    """Удалить редактируемый этап; все сделки с него переместятся на первый этап. Нужны два подтверждения."""
+    if isinstance(pipeline_id, bool) or pipeline_id <= 0:
+        raise ValueError("pipeline_id must be a positive integer")
+    if isinstance(status_id, bool) or status_id <= 0:
+        raise ValueError("status_id must be a positive integer")
+    if confirm_delete is not True or confirm_deal_reassignment is not True:
+        raise PermissionError(
+            "Both confirm_delete=true and confirm_deal_reassignment=true are required. "
+            "amoCRM moves deals from this stage to the first stage when it is deleted."
+        )
+    current = await api_get(f"/leads/pipelines/{pipeline_id}/statuses/{status_id}")
+    ensure_pipeline_status_is_editable(current, pipeline_id, status_id)
+    result = await api_delete(f"/leads/pipelines/{pipeline_id}/statuses/{status_id}")
+    return _dump({
+        "pipeline_id": pipeline_id,
+        "status_id": status_id,
+        "deleted": True,
+        "deal_reassignment": "Deals from this status are moved to the first status in the pipeline by amoCRM.",
+        "api_result": result,
+    })
+
+
+@mcp.tool()
+async def create_pipeline(name: str, statuses_json: str = "[]", confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Создать воронку с этапами. Изменяет CRM; требует MCP_ALLOW_WRITE=true и прав администратора. statuses_json — JSON-массив объектов этапов."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     statuses = _json_arg(statuses_json, list)
     payload = {"name": name}
     if statuses:
@@ -381,8 +978,9 @@ async def create_pipeline(name: str, statuses_json: str = "[]") -> str:
 
 
 @mcp.tool()
-async def update_pipeline(pipeline_id: int, name: str = "", is_main: bool = False) -> str:
-    """Изменить название или основной статус воронки. Изменяет CRM; требует MCP_ALLOW_WRITE=true и прав администратора."""
+async def update_pipeline(pipeline_id: int, name: str = "", is_main: bool = False, confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Изменить название или основной статус воронки. Изменяет CRM; требует MCP_ALLOW_WRITE=true и прав администратора."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     if pipeline_id <= 0:
         raise ValueError("pipeline_id must be positive")
     item = {"id": pipeline_id}
@@ -396,8 +994,9 @@ async def update_pipeline(pipeline_id: int, name: str = "", is_main: bool = Fals
 
 
 @mcp.tool()
-async def add_call_record(phone: str, duration: int, direction: str, source: str, link: str = "", call_result: str = "", call_status: int = 0, responsible_user_id: int = 0) -> str:
-    """Записать завершённый входящий/исходящий звонок в карточку контакта по номеру. Это не инициирует реальный звонок; требует MCP_ALLOW_WRITE=true."""
+async def add_call_record(phone: str, duration: int, direction: str, source: str, link: str = "", call_result: str = "", call_status: int = 0, responsible_user_id: int = 0, confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Записать завершённый входящий/исходящий звонок в карточку контакта по номеру. Это не инициирует реальный звонок; требует MCP_ALLOW_WRITE=true."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     if direction not in {"inbound", "outbound"}:
         raise ValueError("direction must be inbound or outbound")
     if duration < 0 or not phone.strip() or not source.strip():
@@ -417,8 +1016,9 @@ async def add_call_record(phone: str, duration: int, direction: str, source: str
 
 
 @mcp.tool()
-async def create_webhook(destination: str, events_json: str) -> str:
-    """Подписать amoCRM на события и отправлять их на HTTPS URL. Изменяет настройки интеграции; требует MCP_ALLOW_WRITE=true и прав администратора."""
+async def create_webhook(destination: str, events_json: str, confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Подписать amoCRM на события и отправлять их на HTTPS URL. Изменяет настройки интеграции; требует MCP_ALLOW_WRITE=true и прав администратора."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     from urllib.parse import urlparse
     parsed = urlparse(destination)
     if parsed.scheme != "https" or not parsed.hostname:
@@ -430,8 +1030,9 @@ async def create_webhook(destination: str, events_json: str) -> str:
 
 
 @mcp.tool()
-async def create_amma_agent(name: str, description: str, system_prompt: str, ai_instructions: str = "", model_size: str = "M") -> str:
-    """Создать ИИ-агента Аммы, подключённого к этому MCP. Нужен scope «Амма» (только технический аккаунт amoCRM), доступность Аммы и MCP_ALLOW_WRITE=true."""
+async def create_amma_agent(name: str, description: str, system_prompt: str, ai_instructions: str = "", model_size: str = "M", confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Создать ИИ-агента Аммы, подключённого к этому MCP. Нужен scope «Амма» (только технический аккаунт amoCRM), доступность Аммы и MCP_ALLOW_WRITE=true."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     if model_size not in {"S", "M", "L"}:
         raise ValueError("model_size must be S, M, or L")
     agent = {
@@ -512,8 +1113,9 @@ async def get_amma_agent(agent_id: str) -> str:
 
 
 @mcp.tool()
-async def update_amma_agent(agent_id: str, patch_json: str) -> str:
-    """Обновить агента Аммы (имя, промпты, модель, MCP endpoint, активность). Требуется scope Амма и MCP_ALLOW_WRITE=true."""
+async def update_amma_agent(agent_id: str, patch_json: str, confirm_write: bool = False) -> str:
+    """Требует confirm_write=true после проверки операции. Обновить агента Аммы (имя, промпты, модель, MCP endpoint, активность). Требуется scope Амма и MCP_ALLOW_WRITE=true."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     if not re.fullmatch(r"[0-9a-fA-F-]{36}", agent_id):
         raise ValueError("agent_id must be a UUID")
     patch = _json_arg(patch_json, dict)
@@ -524,19 +1126,257 @@ async def update_amma_agent(agent_id: str, patch_json: str) -> str:
 
 
 @mcp.tool()
-async def delete_amma_agent(agent_id: str) -> str:
-    """Удалить агента Аммы, созданного этой интеграцией. Необратимо; требуется scope Амма и MCP_ALLOW_WRITE=true."""
+async def delete_amma_agent(agent_id: str, confirm_delete: bool = False) -> str:
+    """Требует confirm_delete=true после проверки необратимого действия. Удалить агента Аммы, созданного этой интеграцией. Необратимо; требуется scope Амма и MCP_ALLOW_WRITE=true."""
+    require_explicit_confirmation(confirm_delete, "confirm_delete")
     if not re.fullmatch(r"[0-9a-fA-F-]{36}", agent_id):
         raise ValueError("agent_id must be a UUID")
     return _dump(await api_delete(f"/amma/agents/{agent_id}"))
 
 
 @mcp.tool()
-async def delete_pipeline(pipeline_id: int) -> str:
-    """Удалить пустую воронку. Необратимо; amoCRM запрещает удалять последнюю воронку и воронку со сделками."""
+async def delete_pipeline(pipeline_id: int, confirm_delete: bool = False) -> str:
+    """Требует confirm_delete=true после проверки необратимого действия. Удалить пустую воронку. Необратимо; amoCRM запрещает удалять последнюю воронку и воронку со сделками."""
+    require_explicit_confirmation(confirm_delete, "confirm_delete")
     if pipeline_id <= 0:
         raise ValueError("pipeline_id must be positive")
     return _dump(await api_delete(f"/leads/pipelines/{pipeline_id}"))
+
+
+def _chat_api_client() -> AmoChatApiClient:
+    return AmoChatApiClient(
+        scope_id=os.environ.get("AMOCHAT_SCOPE_ID", "").strip(),
+        secret=os.environ.get("AMOCHAT_CHANNEL_SECRET", "").strip(),
+        base_url=os.environ.get("AMOCHAT_BASE_URL", "https://amojo.amocrm.ru").strip(),
+    )
+
+
+@mcp.tool()
+async def chat_get_history(conversation_id: str, offset: int = 0, limit: int = 50) -> str:
+    """Получить историю сообщений чата через amoCRM Chat API. Нужны scope_id и секрет канала."""
+    await _require_single_account_for_global_provider_config("amoCRM Chat API")
+    data = await _chat_api_client().get_history(
+        conversation_id=conversation_id,
+        offset=offset,
+        limit=limit,
+    )
+    return _dump(data)
+
+
+@mcp.tool()
+async def chat_send_text_message(
+    conversation_id: str,
+    receiver_id: str,
+    receiver_name: str,
+    message_text: str,
+    silent: bool = False,
+    confirm_send: bool = False,
+) -> str:
+    """Отправить текстовое сообщение в чат amoCRM. Требует confirm_send=true после одобрения отправки и MCP_ALLOW_WRITE=true."""
+    await _require_single_account_for_global_provider_config("amoCRM Chat API")
+    require_explicit_confirmation(confirm_send, "confirm_send")
+    if os.environ.get("MCP_ALLOW_WRITE", "false").lower() != "true":
+        raise PermissionError("Chat API write operations are disabled by default")
+    required = {
+        "AMOCHAT_BOT_CLIENT_ID": os.environ.get("AMOCHAT_BOT_CLIENT_ID", "").strip(),
+        "AMOCHAT_BOT_REF_ID": os.environ.get("AMOCHAT_BOT_REF_ID", "").strip(),
+        "AMOCHAT_BOT_NAME": os.environ.get("AMOCHAT_BOT_NAME", "").strip(),
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise RuntimeError("Missing Chat API bot configuration: " + ", ".join(missing))
+    if not conversation_id.strip() or not receiver_id.strip() or not receiver_name.strip() or not message_text.strip():
+        raise ValueError("conversation_id, receiver_id, receiver_name and message_text are required")
+    now = time.time()
+    payload = {
+        "event_type": "new_message",
+        "payload": {
+            "timestamp": int(now),
+            "msec_timestamp": int(now * 1000),
+            "msgid": "veb-" + str(uuid.uuid4()),
+            "conversation_id": conversation_id,
+            "sender": {
+                "id": required["AMOCHAT_BOT_CLIENT_ID"],
+                "name": required["AMOCHAT_BOT_NAME"],
+                "ref_id": required["AMOCHAT_BOT_REF_ID"],
+            },
+            "receiver": {"id": receiver_id, "name": receiver_name},
+            "message": {"type": "text", "text": message_text},
+            "silent": silent,
+        },
+    }
+    return _dump(await _chat_api_client().send_message(payload))
+
+
+@mcp.tool()
+async def transcription_transcribe_audio_url(
+    audio_url: str,
+    language: str = "",
+    diarize: bool = True,
+    tag_audio_events: bool = True,
+) -> str:
+    """Транскрибировать запись звонка через ElevenLabs Scribe v2. Требуются API key, allowlist доменов и MCP_ALLOW_PAID_AI=true."""
+    await _require_single_account_for_global_provider_config("ElevenLabs transcription")
+    result = await transcribe_source_url(
+        audio_url=audio_url,
+        language=language,
+        diarize=diarize,
+        tag_audio_events=tag_audio_events,
+    )
+    return _dump(result)
+
+
+@mcp.tool()
+async def voice_start_outbound_call(
+    to_number: str,
+    confirm_call: bool = False,
+    crm_contact_id: int = 0,
+    preferred_language: str = "",
+) -> str:
+    """Начать исходящий AI-звонок через ElevenLabs SIP с необязательной CRM-корреляцией. Требуются allowlist номера, включённые платные операции и явное confirm_call=true."""
+    await _require_single_account_for_global_provider_config("ElevenLabs voice telephony")
+    result = await start_outbound_call(
+        to_number=to_number,
+        confirm_call=confirm_call,
+        crm_contact_id=crm_contact_id or None,
+        preferred_language=preferred_language,
+    )
+    return _dump(result)
+
+
+@mcp.tool()
+async def get_supported_languages() -> str:
+    """Получить языки диалогов V1: русский, кыргызский, казахский и узбекский."""
+    return _dump(list(SUPPORTED_LANGUAGES.values()))
+
+
+@mcp.tool()
+async def resolve_conversation_language(
+    preferred_language: str = "",
+    detected_language: str = "",
+    fallback_language: str = "",
+) -> str:
+    """Выбрать язык диалога: предпочтение контакта, распознанный язык, резервный язык, затем русский."""
+    resolved = resolve_language(
+        preferred_language=preferred_language or None,
+        detected_language=detected_language or None,
+        fallback_language=fallback_language or None,
+    )
+    return _dump(get_language_profile(resolved))
+
+
+@mcp.tool()
+async def conversation_preview_post_call_actions(event_id: str) -> str:
+    """Preview CRM note/task proposals from a stored completed voice call. Read-only; never mutates CRM."""
+    await _require_single_account_for_global_provider_config("ElevenLabs post-call automation")
+    if not isinstance(event_id, str) or not event_id.strip():
+        raise ValueError("event_id is required")
+    rows = await db(
+        "GET",
+        "communication_webhook_events",
+        params={
+            "provider": "eq.elevenlabs",
+            "event_id": "eq." + event_id.strip(),
+            "select": "raw_payload,event_type,processing_status",
+            "limit": "1",
+        },
+    )
+    if not rows:
+        raise ValueError("Completed call event was not found")
+    payload = rows[0].get("raw_payload")
+    return _dump(build_post_call_action_plan(payload))
+
+
+@mcp.custom_route("/webhooks/amo-chat", methods=["POST"])
+async def receive_amocrm_chat_webhook(request: Request) -> JSONResponse:
+    """Authenticate and idempotently persist an amoCRM Chat API event."""
+    try:
+        await _require_single_account_for_global_provider_config("shared webhook provider secret")
+    except (RuntimeError, PermissionError):
+        return JSONResponse(
+            {"error": "provider_credentials_not_account_scoped"},
+            status_code=503,
+        )
+
+    raw_body = await request.body()
+    if len(raw_body) > 262144:
+        return JSONResponse({"error": "payload_too_large"}, status_code=413)
+    secret = os.environ.get("AMOCHAT_CHANNEL_SECRET", "").strip()
+    signature = request.headers.get("X-Signature", "")
+    if not verify_amocrm_chat_signature(raw_body, signature, secret):
+        return JSONResponse({"error": "invalid_signature"}, status_code=401)
+    try:
+        payload = json.loads(raw_body)
+        provider_name, event_type, event_id, conversation_id = build_webhook_event_identity(
+            "amocrm_chat", payload, raw_body
+        )
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return JSONResponse({"error": "invalid_payload"}, status_code=400)
+    try:
+        await db(
+            "POST",
+            "communication_webhook_events",
+            params={"on_conflict": "provider,event_id"},
+            payload={
+                "provider": provider_name,
+                "event_id": event_id,
+                "event_type": event_type,
+                "conversation_id": conversation_id,
+                "raw_payload": payload,
+                "processing_status": "received",
+            },
+            prefer="resolution=ignore-duplicates,return=minimal",
+        )
+    except Exception:
+        return JSONResponse({"error": "event_persistence_failed"}, status_code=503)
+    return JSONResponse({"status": "accepted"})
+
+
+@mcp.custom_route("/webhooks/elevenlabs", methods=["POST"])
+async def receive_elevenlabs_webhook(request: Request) -> JSONResponse:
+    """Authenticate and idempotently persist ElevenLabs post-call events."""
+    try:
+        await _require_single_account_for_global_provider_config("shared webhook provider secret")
+    except (RuntimeError, PermissionError):
+        return JSONResponse(
+            {"error": "provider_credentials_not_account_scoped"},
+            status_code=503,
+        )
+
+    raw_body = await request.body()
+    if len(raw_body) > 1048576:
+        return JSONResponse({"error": "payload_too_large"}, status_code=413)
+    secret = os.environ.get("ELEVENLABS_WEBHOOK_SECRET", "").strip()
+    signature = request.headers.get("ElevenLabs-Signature", "")
+    if not verify_elevenlabs_signature(raw_body, signature, secret):
+        return JSONResponse({"error": "invalid_signature"}, status_code=401)
+    try:
+        payload = json.loads(raw_body)
+        provider_name, event_type, event_id, conversation_id = build_webhook_event_identity(
+            "elevenlabs", payload, raw_body
+        )
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return JSONResponse({"error": "invalid_payload"}, status_code=400)
+    if event_type not in {"post_call_transcription", "call_initiation_failure"}:
+        return JSONResponse({"error": "unsupported_event_type"}, status_code=400)
+    try:
+        await db(
+            "POST",
+            "communication_webhook_events",
+            params={"on_conflict": "provider,event_id"},
+            payload={
+                "provider": provider_name,
+                "event_id": event_id,
+                "event_type": event_type,
+                "conversation_id": conversation_id,
+                "raw_payload": payload,
+                "processing_status": "received",
+            },
+            prefer="resolution=ignore-duplicates,return=minimal",
+        )
+    except Exception:
+        return JSONResponse({"error": "event_persistence_failed"}, status_code=503)
+    return JSONResponse({"status": "accepted"})
 
 
 @mcp.custom_route("/health", methods=["GET"])
@@ -569,17 +1409,18 @@ async def health_check(request: Request) -> JSONResponse:
             amo_status = "connected"
     except Exception:
         pass
+    tool_count = len(await mcp.list_tools())
     return JSONResponse({
         "status": "ok",
         "service": "amoCRM MCP",
-        "tools": 40,
+        "tools": tool_count,
         "supabase": supabase_status,
         "amoCRM": amo_status,
     })
 
 
 register_amo_routes(mcp)
-app = mcp.streamable_http_app()
+app = McpSessionScopeMiddleware(mcp.streamable_http_app())
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")

@@ -2,6 +2,7 @@
 import base64, hashlib, hmac, json, os, secrets, time
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode, urlparse
+from oauth_redirect import build_authorization_redirect_url
 
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -12,6 +13,9 @@ from mcp.server.auth.provider import (
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, PlainTextResponse
+from connection_lifecycle import resolve_connection_for_session
+from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp_session_scope import get_current_mcp_session_id
 
 BASE = "https://amocrm-mcp-ascan-006.vercel.app"
 AMO_REDIRECT = os.getenv("AMOCRM_REDIRECT_URI", BASE + "/oauth/callback")
@@ -141,10 +145,86 @@ class SupabaseOAuthProvider(OAuthAuthorizationServerProvider):
 
 provider = SupabaseOAuthProvider()
 
+def get_mcp_selection_identity() -> tuple[str, str]:
+    """Return an authenticated MCP principal and this request's Streamable HTTP session ID."""
+    access = get_access_token()
+    if access is None or not getattr(access, "client_id", None):
+        raise RuntimeError("Account selection requires an authenticated MCP OAuth request.")
+    session_id = get_current_mcp_session_id()
+    if not session_id:
+        raise RuntimeError(
+            "The MCP request has no mcp-session-id. Reconnect through the Streamable HTTP MCP endpoint."
+        )
+    principal = str(getattr(access, "subject", None) or ("client:" + access.client_id))
+    return principal, session_id
+
+
+async def get_selected_amocrm_account_id() -> int | None:
+    principal, session_id = get_mcp_selection_identity()
+    rows = await db(
+        "GET",
+        "mcp_account_selections",
+        params={
+            "mcp_principal": "eq." + principal,
+            "mcp_session_id": "eq." + session_id,
+            "select": "account_id",
+            "limit": "1",
+        },
+    )
+    return int(rows[0]["account_id"]) if rows else None
+
+
+async def set_selected_amocrm_account(account_id: int) -> dict:
+    if isinstance(account_id, bool) or not isinstance(account_id, int) or account_id <= 0:
+        raise ValueError("account_id must be a positive integer")
+    principal, session_id = get_mcp_selection_identity()
+    accounts = await db(
+        "GET",
+        "amocrm_connections",
+        params={
+            "account_id": "eq." + str(account_id),
+            "select": "account_id,account_name,base_domain",
+            "limit": "1",
+        },
+    )
+    if not accounts:
+        raise LookupError("The requested amoCRM account is not in the connected account catalogue.")
+    await db(
+        "POST",
+        "mcp_account_selections",
+        params={"on_conflict": "mcp_principal,mcp_session_id"},
+        payload={
+            "mcp_principal": principal,
+            "mcp_session_id": session_id,
+            "account_id": account_id,
+            "selected_at": datetime.now(timezone.utc).isoformat(),
+        },
+        prefer="resolution=merge-duplicates,return=minimal",
+    )
+    return accounts[0]
+
+
+async def _resolve_current_connection():
+    rows = await db(
+        "GET",
+        "amocrm_connections",
+        params={"select": "*", "order": "created_at.desc", "limit": "100"},
+    )
+    try:
+        selected_account_id = await get_selected_amocrm_account_id()
+    except RuntimeError:
+        # Preserve local stdio compatibility for a single account only.
+        if len(rows) == 1:
+            return rows[0]
+        raise
+    row = resolve_connection_for_session(rows, selected_account_id)
+    if selected_account_id is None and len(rows) == 1:
+        await set_selected_amocrm_account(int(row["account_id"]))
+    return row
+
+
 async def amo_access_token():
-    rows=await db("GET","amocrm_connections",params={"select":"*","limit":"1"})
-    if not rows: raise RuntimeError("amoCRM is not connected. Open /connect first.")
-    row=rows[0]
+    row = await _resolve_current_connection()
     expiry=datetime.fromisoformat(row["expires_at"].replace("Z","+00:00"))
     if expiry > datetime.now(timezone.utc)+timedelta(minutes=3):
         return decrypt(row["access_token_enc"]), row["base_domain"]
@@ -237,7 +317,38 @@ def register_amo_routes(mcp):
             r.raise_for_status(); tok=r.json()
             a=await c.get(f"https://{domain}/api/v4/account",headers={"Authorization":"Bearer "+tok["access_token"]})
             a.raise_for_status(); account=a.json()
-        await db("POST","amocrm_connections",payload={"account_id":account["id"],"base_domain":domain,"client_id":pending["client_id"],"client_secret_enc":pending["client_secret_enc"],"access_token_enc":encrypt(tok["access_token"]),"refresh_token_enc":encrypt(tok["refresh_token"]),"expires_at":datetime.fromtimestamp(time.time()+int(tok["expires_in"]),timezone.utc).isoformat()},prefer="resolution=merge-duplicates,return=minimal")
+        existing = await db(
+            "GET",
+            "amocrm_connections",
+            params={
+                "account_id": "eq." + str(account["id"]),
+                "select": "account_id,guarantee_until",
+                "limit": "1",
+            },
+        )
+        connection_payload = {
+            "account_id": account["id"],
+            "account_name": str(account.get("name") or account.get("subdomain") or domain)[:200],
+            "base_domain": domain,
+            "client_id": pending["client_id"],
+            "client_secret_enc": pending["client_secret_enc"],
+            "access_token_enc": encrypt(tok["access_token"]),
+            "refresh_token_enc": encrypt(tok["refresh_token"]),
+            "expires_at": datetime.fromtimestamp(
+                time.time() + int(tok["expires_in"]), timezone.utc
+            ).isoformat(),
+        }
+        # Seven-day guarantee is shown in the catalogue only; it never disconnects an account.
+        if not existing:
+            connection_payload["guarantee_until"] = (
+                datetime.now(timezone.utc) + timedelta(days=7)
+            ).isoformat()
+        await db(
+            "POST",
+            "amocrm_connections",
+            payload=connection_payload,
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
         await db("DELETE","amocrm_oauth_pending",params={"state":"eq."+state})
         return HTMLResponse("<!doctype html><html><meta charset=utf-8><h2>amoCRM подключена</h2><p>Токены сохранены в зашифрованном виде. Можно закрыть это окно.</p></html>")
 
@@ -264,4 +375,4 @@ def register_amo_routes(mcp):
         auth=AuthorizationCode(code=code,scopes=p["scopes"],expires_at=time.time()+180,client_id=p["client_id"],code_challenge=p["code_challenge"],redirect_uri=p["redirect_uri"],redirect_uri_provided_explicitly=p["redirect_uri_provided_explicitly"],resource=p.get("resource"))
         await db("POST","mcp_oauth_authorization_codes",payload={"code_hash":digest(code),"client_id":p["client_id"],"payload":auth.model_dump(mode="json"),"expires_at":datetime.fromtimestamp(auth.expires_at,timezone.utc).isoformat()},prefer="return=minimal")
         await db("DELETE","mcp_oauth_pending",params={"transaction_id":"eq."+sid})
-        return RedirectResponse(auth.redirect_uri+"?"+urlencode({"code":code,"state":p.get("state") or ""}),status_code=302,headers={"Cache-Control":"no-store"})
+        return RedirectResponse(build_authorization_redirect_url(auth.redirect_uri, code, p.get("state") or ""),status_code=302,headers={"Cache-Control":"no-store"})
