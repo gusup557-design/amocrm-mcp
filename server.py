@@ -20,6 +20,7 @@ from conversation_automation import build_post_call_action_plan
 from connection_lifecycle import ensure_disconnect_confirmation, public_connection_summaries
 from oauth_backend import get_mcp_selection_identity, get_selected_amocrm_account_id, set_selected_amocrm_account
 from mcp_session_scope import McpSessionScopeMiddleware
+from provider_scope import ensure_global_provider_scope
 from provisioning import build_client_setup_plan, get_provider_catalog as build_provider_catalog, validate_sip_endpoint
 from handover import build_client_handover_checklist
 import os
@@ -81,6 +82,16 @@ mcp = FastMCP(
     auth=auth_settings,
     transport_security=TransportSecuritySettings(allowed_hosts=_allowed_hosts),
 )
+
+
+async def _require_single_account_for_global_provider_config(provider_name: str) -> None:
+    """Fail closed while a provider still relies on one process-global credential set."""
+    rows = await db(
+        "GET",
+        "amocrm_connections",
+        params={"select": "account_id", "limit": "2"},
+    )
+    ensure_global_provider_scope(len(rows), provider_name)
 
 
 async def get_headers():
@@ -1143,6 +1154,7 @@ def _chat_api_client() -> AmoChatApiClient:
 @mcp.tool()
 async def chat_get_history(conversation_id: str, offset: int = 0, limit: int = 50) -> str:
     """Получить историю сообщений чата через amoCRM Chat API. Нужны scope_id и секрет канала."""
+    await _require_single_account_for_global_provider_config("amoCRM Chat API")
     data = await _chat_api_client().get_history(
         conversation_id=conversation_id,
         offset=offset,
@@ -1161,6 +1173,7 @@ async def chat_send_text_message(
     confirm_send: bool = False,
 ) -> str:
     """Отправить текстовое сообщение в чат amoCRM. Требует confirm_send=true после одобрения отправки и MCP_ALLOW_WRITE=true."""
+    await _require_single_account_for_global_provider_config("amoCRM Chat API")
     require_explicit_confirmation(confirm_send, "confirm_send")
     if os.environ.get("MCP_ALLOW_WRITE", "false").lower() != "true":
         raise PermissionError("Chat API write operations are disabled by default")
@@ -1203,6 +1216,7 @@ async def transcription_transcribe_audio_url(
     tag_audio_events: bool = True,
 ) -> str:
     """Транскрибировать запись звонка через ElevenLabs Scribe v2. Требуются API key, allowlist доменов и MCP_ALLOW_PAID_AI=true."""
+    await _require_single_account_for_global_provider_config("ElevenLabs transcription")
     result = await transcribe_source_url(
         audio_url=audio_url,
         language=language,
@@ -1220,6 +1234,7 @@ async def voice_start_outbound_call(
     preferred_language: str = "",
 ) -> str:
     """Начать исходящий AI-звонок через ElevenLabs SIP с необязательной CRM-корреляцией. Требуются allowlist номера, включённые платные операции и явное confirm_call=true."""
+    await _require_single_account_for_global_provider_config("ElevenLabs voice telephony")
     result = await start_outbound_call(
         to_number=to_number,
         confirm_call=confirm_call,
@@ -1253,6 +1268,7 @@ async def resolve_conversation_language(
 @mcp.tool()
 async def conversation_preview_post_call_actions(event_id: str) -> str:
     """Preview CRM note/task proposals from a stored completed voice call. Read-only; never mutates CRM."""
+    await _require_single_account_for_global_provider_config("ElevenLabs post-call automation")
     if not isinstance(event_id, str) or not event_id.strip():
         raise ValueError("event_id is required")
     rows = await db(
@@ -1274,6 +1290,14 @@ async def conversation_preview_post_call_actions(event_id: str) -> str:
 @mcp.custom_route("/webhooks/amo-chat", methods=["POST"])
 async def receive_amocrm_chat_webhook(request: Request) -> JSONResponse:
     """Authenticate and idempotently persist an amoCRM Chat API event."""
+    try:
+        await _require_single_account_for_global_provider_config("shared webhook provider secret")
+    except (RuntimeError, PermissionError):
+        return JSONResponse(
+            {"error": "provider_credentials_not_account_scoped"},
+            status_code=503,
+        )
+
     raw_body = await request.body()
     if len(raw_body) > 262144:
         return JSONResponse({"error": "payload_too_large"}, status_code=413)
@@ -1311,6 +1335,14 @@ async def receive_amocrm_chat_webhook(request: Request) -> JSONResponse:
 @mcp.custom_route("/webhooks/elevenlabs", methods=["POST"])
 async def receive_elevenlabs_webhook(request: Request) -> JSONResponse:
     """Authenticate and idempotently persist ElevenLabs post-call events."""
+    try:
+        await _require_single_account_for_global_provider_config("shared webhook provider secret")
+    except (RuntimeError, PermissionError):
+        return JSONResponse(
+            {"error": "provider_credentials_not_account_scoped"},
+            status_code=503,
+        )
+
     raw_body = await request.body()
     if len(raw_body) > 1048576:
         return JSONResponse({"error": "payload_too_large"}, status_code=413)

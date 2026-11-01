@@ -15,6 +15,7 @@
 - Preserve all existing CRM tools and upstream coverage; add only the account catalogue/selection tools required for the workflow.
 - Multiple connected amoCRM accounts are allowed. Never silently choose between several accounts; selection is explicit and scoped to one MCP session.
 - All credential values stay server-side, secrets are never returned or logged.
+- Provider credentials still stored as global environment variables must be fail-closed when multiple CRM accounts are connected; they must not leak across account selection.
 - CRM writes, outbound messages, paid transcription, and calls remain denied by default and require explicit guards.
 - Manual client-side actions must be stated explicitly and checked before handover.
 

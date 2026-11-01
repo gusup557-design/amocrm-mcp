@@ -146,6 +146,12 @@ The server has no customer business profiles. It keeps a persistent catalogue of
 - `list_amocrm_connections` shows all connected accounts without exposing credentials; `select_amocrm_account(account_id)` and `get_selected_amocrm_account` select/show the account for the current MCP Streamable HTTP session only. Other sessions keep their own selection.
 - `disconnect_amocrm_connection(account_id, confirm_disconnect=true)` manually removes only the selected account's MCP-local OAuth material. There is no seven-day auto-disconnect. The optional seven-day guarantee date is informational only. Full app revocation must still be done in amoCRM.
 
+## Account-scoped provider integrations
+
+CRM REST tools use the account selected for the current MCP session. The current `AMOCHAT_*` and `ELEVENLABS_*` configuration is still deployment-global, not stored per `account_id`. To prevent a global channel secret, phone number, voice agent or webhook secret from being used for the wrong customer, Chat API, transcription, voice-call, post-call and signed webhook tools refuse to run while more than one amoCRM account is connected. This does not block account-scoped CRM REST tools or account selection.
+
+This is a deliberate safety boundary, not the final multi-customer provider architecture. The next provider phase must store each customer's Chat API, ElevenLabs and telephony credentials encrypted and linked to `account_id`, with separate read-only diagnostics and explicit write/call confirmations. These are connection records, not business profiles. Until then, the global provider integrations are usable only when a single CRM account is connected.
+
 ## Operator connection lifecycle
 
 - `list_amocrm_connections` shows the connected account IDs and domains only; it never returns OAuth tokens or client secrets.
