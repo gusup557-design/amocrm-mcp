@@ -1,4 +1,4 @@
-"""Single-active-account policy for the operator-driven amoCRM MCP workflow."""
+"""Safe lifecycle helpers for a persistent amoCRM account catalogue."""
 
 from __future__ import annotations
 
@@ -6,37 +6,44 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 
-_PUBLIC_FIELDS = ("account_id", "base_domain", "expires_at")
+_PUBLIC_FIELDS = (
+    "account_id",
+    "account_name",
+    "base_domain",
+    "expires_at",
+    "created_at",
+    "guarantee_until",
+)
 
 
-def select_single_active_connection(rows: Sequence[Mapping[str, Any]]) -> Mapping[str, Any]:
-    """Return the only connected account; never guess when state is ambiguous."""
+def resolve_connection_for_session(
+    rows: Sequence[Mapping[str, Any]],
+    selected_account_id: int | str | None,
+) -> Mapping[str, Any]:
+    """Resolve the account selected for this MCP session, never a global default."""
     if not rows:
-        raise RuntimeError("amoCRM is not connected. Open /connect first.")
-    if len(rows) != 1:
-        raise RuntimeError(
-            "more than one amoCRM account is connected. Disconnect all but one "
-            "account before using CRM tools."
+        raise RuntimeError("amoCRM is not connected. Add an account through /connect first.")
+
+    if selected_account_id is not None:
+        selected = str(selected_account_id)
+        for row in rows:
+            if str(row.get("account_id", "")) == selected:
+                return row
+        raise LookupError(
+            "The selected amoCRM account is no longer connected. Select another account."
         )
-    return rows[0]
 
+    if len(rows) == 1:
+        return rows[0]
 
-def ensure_no_other_active_account(
-    rows: Sequence[Mapping[str, Any]], requested_account_id: int | str
-) -> None:
-    """Allow reconnecting the same account, but reject switching without disconnect."""
-    requested = str(requested_account_id)
-    for row in rows:
-        existing = str(row.get("account_id", ""))
-        if existing and existing != requested:
-            raise PermissionError(
-                "A different amoCRM account is already connected; disconnect it Disconnect it "
-                "through the MCP before connecting another client account."
-            )
+    raise RuntimeError(
+        "Multiple amoCRM accounts are connected. Call select_amocrm_account(account_id) "
+        "to choose the account for this MCP session before using CRM tools."
+    )
 
 
 def ensure_disconnect_confirmation(confirm_disconnect: bool) -> None:
-    """Require an explicit boolean confirmation for local credential deletion."""
+    """Require explicit operator confirmation before deleting a local OAuth connection."""
     if confirm_disconnect is not True:
         raise PermissionError(
             "Disconnecting removes the MCP-stored OAuth credentials. "
@@ -46,9 +53,15 @@ def ensure_disconnect_confirmation(confirm_disconnect: bool) -> None:
 
 def public_connection_summaries(
     rows: Sequence[Mapping[str, Any]],
+    selected_account_id: int | str | None = None,
 ) -> list[dict[str, Any]]:
-    """Expose only safe account metadata, never tokens, secrets, or encrypted blobs."""
-    return [
-        {field: row[field] for field in _PUBLIC_FIELDS if field in row}
-        for row in rows
-    ]
+    """Expose safe catalogue metadata only; never return token or secret fields."""
+    selected = str(selected_account_id) if selected_account_id is not None else None
+    summaries: list[dict[str, Any]] = []
+    for row in rows:
+        item = {field: row[field] for field in _PUBLIC_FIELDS if field in row}
+        item["selected"] = (
+            selected is not None and str(row.get("account_id", "")) == selected
+        )
+        summaries.append(item)
+    return summaries

@@ -134,7 +134,7 @@ Supabase and encryption keys are server-only. The health endpoint checks connect
 
 ## Client provisioning and setup audit
 
-The server has no persistent customer profiles. The operator connects one customer amoCRM account at a time, runs a read-only audit and generates a setup plan, performs the manual provider-owner actions, tests the setup, hands the system back and disconnects the local MCP OAuth credentials.
+The server has no customer business profiles. It keeps a persistent catalogue of separately authorized amoCRM accounts. The operator connects each customer account once, selects the required account for the current MCP session, runs the audit/setup tools, performs manual owner-side actions, tests the result and hands the system back. Each account remains connected until the operator explicitly disconnects it.
 
 - `get_amocrm_setup_report` checks the account, pipelines, users, custom fields, lead sources, webhooks, widgets and catalogs. It returns counts/statuses rather than contact/customer records.
 - `get_client_setup_plan` generates an industry pipeline template and an ordered checklist for the selected telephony provider and channels. It stores nothing and performs no writes.
@@ -143,14 +143,15 @@ The server has no persistent customer profiles. The operator connects one custom
 
 - `get_client_handover_checklist` checks owner access, customer-owned provider accounts, transferred keys, tested call/chat routes, webhooks, automations, billing, privacy disclosure and removal of MCP-local credentials. Entries are operator attestations, not independently verified facts.
 
-- `list_amocrm_connections` and `disconnect_amocrm_connection` support one connected account at a time. Disconnecting removes MCP-local OAuth material only; full app revocation must still be done in amoCRM.
+- `list_amocrm_connections` shows all connected accounts without exposing credentials; `select_amocrm_account(account_id)` and `get_selected_amocrm_account` select/show the account for the current MCP Streamable HTTP session only. Other sessions keep their own selection.
+- `disconnect_amocrm_connection(account_id, confirm_disconnect=true)` manually removes only the selected account's MCP-local OAuth material. There is no seven-day auto-disconnect. The optional seven-day guarantee date is informational only. Full app revocation must still be done in amoCRM.
 
 ## Operator connection lifecycle
 
 - `list_amocrm_connections` shows the connected account IDs and domains only; it never returns OAuth tokens or client secrets.
 - `disconnect_amocrm_connection(account_id, confirm_disconnect=true)` removes only the MCP's stored OAuth credentials for that account.
-- The MCP refuses to operate when multiple amoCRM accounts are connected and refuses a new distinct account until the previous account is disconnected.
-- Disconnecting the MCP's local credentials does **not** uninstall or revoke the integration in amoCRM. The operator must separately remove or revoke the integration in the customer's amoCRM account when full access removal is required.
+- Multiple customer accounts may remain connected in the catalogue. CRM tools require an explicit account selection when more than one is connected; the selection is isolated by the MCP session ID so concurrent sessions cannot switch one another's account.
+- Account connections have no automatic seven-day expiry. The guarantee date is informational, and the operator can leave an account connected indefinitely. Disconnecting the MCP's local credentials does **not** uninstall or revoke the integration in amoCRM. The operator must separately remove or revoke the integration in the customer's amoCRM account when full access removal is required.
 
 ## Remote OAuth deployment
 

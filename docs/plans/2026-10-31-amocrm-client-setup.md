@@ -4,7 +4,7 @@
 
 **Goal:** Turn the existing amoCRM MCP into a reusable toolkit for configuring one client account at a time, verifying the setup, and safely handing the account back.
 
-**Architecture:** Keep one MCP server and no client-profile registry. The operator connects one client's amoCRM account, performs the setup, disconnects the local MCP authorization, and then connects the next account. Provider secrets remain deployment-side/manual inputs; the server must not expose or log them. Provider support is capability-driven and distinguishes API automation from owner/operator manual steps.
+**Architecture:** Keep one MCP server and no customer business-profile registry. Maintain a persistent OAuth account catalogue for multiple client amoCRM accounts. Select an account per MCP Streamable HTTP session, not through a process-global variable. Connections remain until the operator explicitly disconnects them; the seven-day guarantee date is informational and never expires credentials. Provider secrets remain deployment-side/manual inputs; the server must not expose or log them.
 
 **Tech Stack:** Python 3.12, MCP Python SDK v1.x, Starlette, httpx, Supabase (existing private OAuth persistence), GitHub Actions.
 
@@ -12,8 +12,8 @@
 
 - Work only on `feat/chat-voice-language-foundation`; do not merge or push to `main`.
 - No production deploy, live CRM mutation, database migration, paid API request, number purchase, or real phone call without a separate explicit approval.
-- Preserve the existing 47 tools and all upstream CRM tools.
-- One active amoCRM connection at a time; never silently choose one from several.
+- Preserve all existing CRM tools and upstream coverage; add only the account catalogue/selection tools required for the workflow.
+- Multiple connected amoCRM accounts are allowed. Never silently choose between several accounts; selection is explicit and scoped to one MCP session.
 - All credential values stay server-side, secrets are never returned or logged.
 - CRM writes, outbound messages, paid transcription, and calls remain denied by default and require explicit guards.
 - Manual client-side actions must be stated explicitly and checked before handover.

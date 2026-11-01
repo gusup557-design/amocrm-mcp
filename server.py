@@ -18,6 +18,8 @@ from webhook_security import verify_amocrm_chat_signature, verify_elevenlabs_sig
 from webhook_events import build_webhook_event_identity
 from conversation_automation import build_post_call_action_plan
 from connection_lifecycle import ensure_disconnect_confirmation, public_connection_summaries
+from oauth_backend import get_mcp_selection_identity, get_selected_amocrm_account_id, set_selected_amocrm_account
+from mcp_session_scope import McpSessionScopeMiddleware
 from provisioning import build_client_setup_plan, get_provider_catalog as build_provider_catalog, validate_sip_endpoint
 from handover import build_client_handover_checklist
 import os
@@ -419,23 +421,102 @@ def _json_arg(value: str, expected_type):
 
 @mcp.tool()
 async def list_amocrm_connections() -> str:
-    """Показать подключённые к MCP аккаунты amoCRM без токенов и секретов."""
+    """Показать постоянный каталог подключённых аккаунтов amoCRM без токенов и секретов.
+
+    Аккаунты остаются подключёнными до ручного отключения. Дата окончания гарантии
+    отображается только как справочная информация и не отключает доступ.
+    """
     rows = await db(
         "GET",
         "amocrm_connections",
-        params={"select": "account_id,base_domain,expires_at", "order": "account_id.asc", "limit": "100"},
+        params={
+            "select": "account_id,account_name,base_domain,expires_at,created_at,guarantee_until",
+            "order": "created_at.desc",
+            "limit": "100",
+        },
     )
+    selected_account_id = None
+    try:
+        selected_account_id = await get_selected_amocrm_account_id()
+    except RuntimeError:
+        # The catalogue may still be displayed; account selection requires an authenticated MCP session.
+        pass
+    accounts = public_connection_summaries(rows, selected_account_id)
     return _dump({
-        "connected_accounts": public_connection_summaries(rows),
-        "active_account_policy": "exactly_one",
-        "requires_disconnect_before_switch": True,
+        "connected_accounts": accounts,
+        "account_count": len(accounts),
+        "selection_scope": "this MCP Streamable HTTP session only",
+        "automatic_disconnect": False,
+        "retention_policy": "kept until disconnect_amocrm_connection is called explicitly",
+        "guarantee_policy": "guarantee_until is informational only; it is not an account expiry date",
+    })
+
+
+@mcp.tool()
+async def select_amocrm_account(account_id: int) -> str:
+    """Выбрать аккаунт amoCRM только для текущей MCP-сессии.
+
+    Выбор не влияет на другие чаты или параллельные MCP-сессии.
+    """
+    account = await set_selected_amocrm_account(account_id)
+    return _dump({
+        "selected_account": {
+            "account_id": account["account_id"],
+            "account_name": account.get("account_name") or "",
+            "base_domain": account["base_domain"],
+        },
+        "selection_scope": "current MCP session only",
+        "other_sessions_unchanged": True,
+    })
+
+
+@mcp.tool()
+async def get_selected_amocrm_account() -> str:
+    """Показать аккаунт, выбранный в текущей MCP-сессии, не переключая другие сессии."""
+    rows = await db(
+        "GET",
+        "amocrm_connections",
+        params={"select": "account_id,account_name,base_domain,guarantee_until", "order": "created_at.desc", "limit": "100"},
+    )
+    selected_id = await get_selected_amocrm_account_id()
+    if selected_id is None and len(rows) == 1:
+        account = await set_selected_amocrm_account(int(rows[0]["account_id"]))
+        selected_id = int(account["account_id"])
+    if selected_id is None:
+        return _dump({
+            "selected_account": None,
+            "selection_required": len(rows) > 1,
+            "message": (
+                "Select an account with select_amocrm_account(account_id) before using CRM tools."
+                if len(rows) > 1 else "No amoCRM account is connected."
+            ),
+        })
+    selected = next((row for row in rows if int(row["account_id"]) == selected_id), None)
+    if selected is None:
+        return _dump({
+            "selected_account": None,
+            "selection_required": True,
+            "message": "The selected account is no longer connected. Select another account.",
+        })
+    return _dump({
+        "selected_account": {
+            "account_id": selected["account_id"],
+            "account_name": selected.get("account_name") or "",
+            "base_domain": selected["base_domain"],
+            "guarantee_until": selected.get("guarantee_until"),
+        },
+        "selection_scope": "current MCP session only",
     })
 
 
 @mcp.tool()
 async def disconnect_amocrm_connection(account_id: int, confirm_disconnect: bool = False) -> str:
-    """Удалить локально сохранённые OAuth-данные одного аккаунта MCP. Не удаляет интеграцию в amoCRM."""
-    if isinstance(account_id, bool) or account_id <= 0:
+    """Вручную удалить локальные OAuth-данные аккаунта из каталога MCP.
+
+    Никакого автоматического отключения через 7 дней нет. Интеграцию в amoCRM
+    нужно отдельно отозвать из кабинета клиента, если требуется полный отзыв доступа.
+    """
+    if isinstance(account_id, bool) or not isinstance(account_id, int) or account_id <= 0:
         raise ValueError("account_id must be a positive integer")
     ensure_disconnect_confirmation(confirm_disconnect)
     deleted = await db(
@@ -449,11 +530,12 @@ async def disconnect_amocrm_connection(account_id: int, confirm_disconnect: bool
     return _dump({
         "account_id": account_id,
         "mcp_oauth_credentials_removed": True,
+        "session_selections_cleared": True,
         "amoCRM_integration_revoked": False,
         "manual_next_step": (
-            "If access should be fully removed, uninstall or revoke this MCP integration "
-            "in the customer's amoCRM account. Confirm any other client-owned integrations "
-            "remain installed before handing the account back."
+            "If full access removal is required, uninstall or revoke this MCP integration "
+            "in the customer's amoCRM account. Client-owned telephony, AI and chat integrations "
+            "must remain enabled when the customer still needs them."
         ),
     })
 
@@ -1306,7 +1388,7 @@ async def health_check(request: Request) -> JSONResponse:
 
 
 register_amo_routes(mcp)
-app = mcp.streamable_http_app()
+app = McpSessionScopeMiddleware(mcp.streamable_http_app())
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
