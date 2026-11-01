@@ -2,6 +2,7 @@
 import base64, hashlib, hmac, json, os, secrets, time
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode, urlparse
+from oauth_redirect import build_authorization_redirect_url
 
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -275,4 +276,4 @@ def register_amo_routes(mcp):
         auth=AuthorizationCode(code=code,scopes=p["scopes"],expires_at=time.time()+180,client_id=p["client_id"],code_challenge=p["code_challenge"],redirect_uri=p["redirect_uri"],redirect_uri_provided_explicitly=p["redirect_uri_provided_explicitly"],resource=p.get("resource"))
         await db("POST","mcp_oauth_authorization_codes",payload={"code_hash":digest(code),"client_id":p["client_id"],"payload":auth.model_dump(mode="json"),"expires_at":datetime.fromtimestamp(auth.expires_at,timezone.utc).isoformat()},prefer="return=minimal")
         await db("DELETE","mcp_oauth_pending",params={"transaction_id":"eq."+sid})
-        return RedirectResponse(auth.redirect_uri+"?"+urlencode({"code":code,"state":p.get("state") or ""}),status_code=302,headers={"Cache-Control":"no-store"})
+        return RedirectResponse(build_authorization_redirect_url(auth.redirect_uri, code, p.get("state") or ""),status_code=302,headers={"Cache-Control":"no-store"})
