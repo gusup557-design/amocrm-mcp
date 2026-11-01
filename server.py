@@ -52,6 +52,7 @@ from custom_fields import (
 )
 from pipeline_statuses import ensure_pipeline_status_is_editable, validate_pipeline_status_payload
 from crm_mutations import validate_entity_update_payload, validate_task_update_payload
+from crm_write_guard import require_explicit_confirmation
 
 # amoCRM account and API base domain are resolved from the active OAuth connection.
 
@@ -167,8 +168,9 @@ async def get_lead(lead_id: int) -> str:
 
 
 @mcp.tool()
-async def create_lead(name: str, price: int = 0, status_id: int = 0, pipeline_id: int = 0) -> str:
-    """Создать новую сделку. name — название, price — бюджет, status_id — ID статуса, pipeline_id — ID воронки."""
+async def create_lead(name: str, price: int = 0, status_id: int = 0, pipeline_id: int = 0, confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Создать новую сделку. name — название, price — бюджет, status_id — ID статуса, pipeline_id — ID воронки."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     lead = {"name": name}
     if price:
         lead["price"] = price
@@ -181,8 +183,9 @@ async def create_lead(name: str, price: int = 0, status_id: int = 0, pipeline_id
 
 
 @mcp.tool()
-async def update_lead(lead_id: int, name: str = "", price: int = -1, status_id: int = 0) -> str:
-    """Обновить сделку. lead_id — ID сделки, остальные поля — что обновить."""
+async def update_lead(lead_id: int, name: str = "", price: int = -1, status_id: int = 0, confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Обновить сделку. lead_id — ID сделки, остальные поля — что обновить."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     lead = {"id": lead_id}
     if name:
         lead["name"] = name
@@ -216,8 +219,9 @@ async def get_contact(contact_id: int) -> str:
 
 
 @mcp.tool()
-async def create_contact(first_name: str, last_name: str = "", phone: str = "", email: str = "") -> str:
-    """Создать контакт. first_name — имя, last_name — фамилия, phone — телефон, email — email."""
+async def create_contact(first_name: str, last_name: str = "", phone: str = "", email: str = "", confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Создать контакт. first_name — имя, last_name — фамилия, phone — телефон, email — email."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     contact = {"first_name": first_name}
     if last_name:
         contact["last_name"] = last_name
@@ -254,8 +258,9 @@ async def get_company(company_id: int) -> str:
 
 
 @mcp.tool()
-async def create_company(name: str) -> str:
-    """Создать компанию. name — название компании."""
+async def create_company(name: str, confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Создать компанию. name — название компании."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     data = await api_post("/companies", [{"name": name}])
     return json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -335,8 +340,9 @@ async def get_tasks(page: int = 1, limit: int = 50, order_by: str = "updated_at"
 
 
 @mcp.tool()
-async def create_task(text: str, complete_till: int, entity_id: int = 0, entity_type: str = "leads", task_type_id: int = 1) -> str:
-    """Создать задачу. text — текст, complete_till — дедлайн (unix timestamp), entity_id — ID привязанной сущности, entity_type — тип (leads/contacts/companies), task_type_id — тип задачи (1=звонок, 2=встреча, 3=письмо)."""
+async def create_task(text: str, complete_till: int, entity_id: int = 0, entity_type: str = "leads", task_type_id: int = 1, confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Создать задачу. text — текст, complete_till — дедлайн (unix timestamp), entity_id — ID привязанной сущности, entity_type — тип (leads/contacts/companies), task_type_id — тип задачи (1=звонок, 2=встреча, 3=письмо)."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     task = {
         "text": text,
         "complete_till": complete_till,
@@ -370,8 +376,9 @@ async def get_users() -> str:
 # ===================== ПРИМЕЧАНИЯ =====================
 
 @mcp.tool()
-async def add_note(entity_type: str, entity_id: int, text: str) -> str:
-    """Добавить примечание к сущности. entity_type — leads/contacts/companies, entity_id — ID сущности, text — текст примечания."""
+async def add_note(entity_type: str, entity_id: int, text: str, confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Добавить примечание к сущности. entity_type — leads/contacts/companies, entity_id — ID сущности, text — текст примечания."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     if entity_type not in {"leads", "contacts", "companies"}:
         raise ValueError("entity_type must be leads, contacts, or companies")
     if entity_id <= 0:
@@ -867,8 +874,9 @@ async def delete_pipeline_status(
 
 
 @mcp.tool()
-async def create_pipeline(name: str, statuses_json: str = "[]") -> str:
-    """Создать воронку с этапами. Изменяет CRM; требует MCP_ALLOW_WRITE=true и прав администратора. statuses_json — JSON-массив объектов этапов."""
+async def create_pipeline(name: str, statuses_json: str = "[]", confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Создать воронку с этапами. Изменяет CRM; требует MCP_ALLOW_WRITE=true и прав администратора. statuses_json — JSON-массив объектов этапов."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     statuses = _json_arg(statuses_json, list)
     payload = {"name": name}
     if statuses:
@@ -877,8 +885,9 @@ async def create_pipeline(name: str, statuses_json: str = "[]") -> str:
 
 
 @mcp.tool()
-async def update_pipeline(pipeline_id: int, name: str = "", is_main: bool = False) -> str:
-    """Изменить название или основной статус воронки. Изменяет CRM; требует MCP_ALLOW_WRITE=true и прав администратора."""
+async def update_pipeline(pipeline_id: int, name: str = "", is_main: bool = False, confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Изменить название или основной статус воронки. Изменяет CRM; требует MCP_ALLOW_WRITE=true и прав администратора."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     if pipeline_id <= 0:
         raise ValueError("pipeline_id must be positive")
     item = {"id": pipeline_id}
@@ -892,8 +901,9 @@ async def update_pipeline(pipeline_id: int, name: str = "", is_main: bool = Fals
 
 
 @mcp.tool()
-async def add_call_record(phone: str, duration: int, direction: str, source: str, link: str = "", call_result: str = "", call_status: int = 0, responsible_user_id: int = 0) -> str:
-    """Записать завершённый входящий/исходящий звонок в карточку контакта по номеру. Это не инициирует реальный звонок; требует MCP_ALLOW_WRITE=true."""
+async def add_call_record(phone: str, duration: int, direction: str, source: str, link: str = "", call_result: str = "", call_status: int = 0, responsible_user_id: int = 0, confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Записать завершённый входящий/исходящий звонок в карточку контакта по номеру. Это не инициирует реальный звонок; требует MCP_ALLOW_WRITE=true."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     if direction not in {"inbound", "outbound"}:
         raise ValueError("direction must be inbound or outbound")
     if duration < 0 or not phone.strip() or not source.strip():
@@ -913,8 +923,9 @@ async def add_call_record(phone: str, duration: int, direction: str, source: str
 
 
 @mcp.tool()
-async def create_webhook(destination: str, events_json: str) -> str:
-    """Подписать amoCRM на события и отправлять их на HTTPS URL. Изменяет настройки интеграции; требует MCP_ALLOW_WRITE=true и прав администратора."""
+async def create_webhook(destination: str, events_json: str, confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Подписать amoCRM на события и отправлять их на HTTPS URL. Изменяет настройки интеграции; требует MCP_ALLOW_WRITE=true и прав администратора."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     from urllib.parse import urlparse
     parsed = urlparse(destination)
     if parsed.scheme != "https" or not parsed.hostname:
@@ -926,8 +937,9 @@ async def create_webhook(destination: str, events_json: str) -> str:
 
 
 @mcp.tool()
-async def create_amma_agent(name: str, description: str, system_prompt: str, ai_instructions: str = "", model_size: str = "M") -> str:
-    """Создать ИИ-агента Аммы, подключённого к этому MCP. Нужен scope «Амма» (только технический аккаунт amoCRM), доступность Аммы и MCP_ALLOW_WRITE=true."""
+async def create_amma_agent(name: str, description: str, system_prompt: str, ai_instructions: str = "", model_size: str = "M", confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Создать ИИ-агента Аммы, подключённого к этому MCP. Нужен scope «Амма» (только технический аккаунт amoCRM), доступность Аммы и MCP_ALLOW_WRITE=true."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     if model_size not in {"S", "M", "L"}:
         raise ValueError("model_size must be S, M, or L")
     agent = {
@@ -1008,8 +1020,9 @@ async def get_amma_agent(agent_id: str) -> str:
 
 
 @mcp.tool()
-async def update_amma_agent(agent_id: str, patch_json: str) -> str:
-    """Обновить агента Аммы (имя, промпты, модель, MCP endpoint, активность). Требуется scope Амма и MCP_ALLOW_WRITE=true."""
+async def update_amma_agent(agent_id: str, patch_json: str, confirm_write: bool = False) -> str:
+    Требует confirm_write=true после проверки операции."""Обновить агента Аммы (имя, промпты, модель, MCP endpoint, активность). Требуется scope Амма и MCP_ALLOW_WRITE=true."""
+    require_explicit_confirmation(confirm_write, "confirm_write")
     if not re.fullmatch(r"[0-9a-fA-F-]{36}", agent_id):
         raise ValueError("agent_id must be a UUID")
     patch = _json_arg(patch_json, dict)
@@ -1020,16 +1033,18 @@ async def update_amma_agent(agent_id: str, patch_json: str) -> str:
 
 
 @mcp.tool()
-async def delete_amma_agent(agent_id: str) -> str:
-    """Удалить агента Аммы, созданного этой интеграцией. Необратимо; требуется scope Амма и MCP_ALLOW_WRITE=true."""
+async def delete_amma_agent(agent_id: str, confirm_delete: bool = False) -> str:
+    Требует confirm_delete=true после проверки необратимого действия."""Удалить агента Аммы, созданного этой интеграцией. Необратимо; требуется scope Амма и MCP_ALLOW_WRITE=true."""
+    require_explicit_confirmation(confirm_delete, "confirm_delete")
     if not re.fullmatch(r"[0-9a-fA-F-]{36}", agent_id):
         raise ValueError("agent_id must be a UUID")
     return _dump(await api_delete(f"/amma/agents/{agent_id}"))
 
 
 @mcp.tool()
-async def delete_pipeline(pipeline_id: int) -> str:
-    """Удалить пустую воронку. Необратимо; amoCRM запрещает удалять последнюю воронку и воронку со сделками."""
+async def delete_pipeline(pipeline_id: int, confirm_delete: bool = False) -> str:
+    Требует confirm_delete=true после проверки необратимого действия."""Удалить пустую воронку. Необратимо; amoCRM запрещает удалять последнюю воронку и воронку со сделками."""
+    require_explicit_confirmation(confirm_delete, "confirm_delete")
     if pipeline_id <= 0:
         raise ValueError("pipeline_id must be positive")
     return _dump(await api_delete(f"/leads/pipelines/{pipeline_id}"))
@@ -1061,8 +1076,10 @@ async def chat_send_text_message(
     receiver_name: str,
     message_text: str,
     silent: bool = False,
+    confirm_send: bool = False,
 ) -> str:
-    """Отправить текстовое сообщение в чат amoCRM. Запись заблокирована, пока MCP_ALLOW_WRITE не установлен в true."""
+    """Отправить текстовое сообщение в чат amoCRM. Требует confirm_send=true после одобрения отправки и MCP_ALLOW_WRITE=true."""
+    require_explicit_confirmation(confirm_send, "confirm_send")
     if os.environ.get("MCP_ALLOW_WRITE", "false").lower() != "true":
         raise PermissionError("Chat API write operations are disabled by default")
     required = {
