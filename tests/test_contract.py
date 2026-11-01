@@ -45,7 +45,7 @@ class UpstreamToolPreservationTests(unittest.TestCase):
         self.assertIn("async def api_patch(", self.source)
 
     def test_vercel_exposes_streamable_http_app(self):
-        self.assertIn("app = mcp.streamable_http_app(", self.source)
+        self.assertIn("McpSessionScopeMiddleware(mcp.streamable_http_app())", self.source)
         self.assertIn("TransportSecuritySettings", self.source)
 
     def test_supabase_health_probe_uses_existing_connections_table(self):
