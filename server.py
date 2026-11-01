@@ -1295,10 +1295,11 @@ async def health_check(request: Request) -> JSONResponse:
             amo_status = "connected"
     except Exception:
         pass
+    tool_count = len(await mcp.list_tools())
     return JSONResponse({
         "status": "ok",
         "service": "amoCRM MCP",
-        "tools": 47,
+        "tools": tool_count,
         "supabase": supabase_status,
         "amoCRM": amo_status,
     })
