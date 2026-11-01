@@ -16,6 +16,9 @@ class _FakeToolRegistry:
     async def list_tools(self):
         return self.tools
 
+    def custom_route(self, *args, **kwargs):
+        return lambda function: function
+
 
 class _FakeDatabase:
     async def __call__(self, *args, **kwargs):
