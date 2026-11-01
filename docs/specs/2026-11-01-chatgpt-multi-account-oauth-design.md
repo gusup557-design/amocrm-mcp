@@ -2,7 +2,7 @@
 
 **Status:** Approved architecture; implementation not started  
 **Date:** 2026-11-01  
-**Target branch:** \`feat/chat-voice-language-foundation\`  
+**Target branch:** `feat/chat-voice-language-foundation`  
 **Scope:** Replace operator-password authorization and MCP-session account selection with one OAuth grant per ChatGPT-connected amoCRM account.
 
 ## 1. Product outcome
@@ -13,17 +13,17 @@ Each authenticated MCP request is scoped to the amoCRM account bound to the exac
 
 ## 2. Repository facts verified before design
 
-- \`server.py\` imports \`provider\`, \`register_amo_routes\`, and \`amo_access_token\` from \`oauth_backend.py\`; this is the active authorization implementation.
-- \`oauth_backend.py\` currently sends MCP authorization to \`/oauth/consent\`, which requires \`MCP_ADMIN_PASSWORD\`.
-- The upstream amoCRM integration-button flow currently uses \`/connect\`, \`/oauth/secrets\`, and \`/oauth/callback\`.
-- The callback stores encrypted CRM credentials in \`amocrm_connections\`, whose primary key is \`account_id\`.
-- MCP tokens are stored in \`mcp_oauth_tokens\`; the current JSON payload contains client/scopes/resource but no CRM grant/account binding.
-- \`amo_access_token()\` resolves an account through \`mcp_account_selections\` using an MCP principal and Streamable HTTP session ID.
-- \`server.py\` exposes \`list_amocrm_connections\`, \`select_amocrm_account\`, \`get_selected_amocrm_account\`, and \`disconnect_amocrm_connection\`.
-- \`mcp_account_selections\` is an existing Supabase table. This feature stops using it; it does not drop it.
-- \`requirements.txt\` currently declares \`mcp[cli]>=1.30,<2\`.
-- Supabase project schema inspection showed \`amocrm_connections\`, \`amocrm_oauth_pending\`, \`mcp_oauth_clients\`, \`mcp_oauth_authorization_codes\`, \`mcp_oauth_tokens\`, \`mcp_oauth_pending\`, \`mcp_oauth_codes\`, and \`mcp_account_selections\`. The DB migration history includes six migrations through \`20261101051219_multi_account_registry_and_session_selection\`; the SQL file in this repository is named \`20261101060000_multi_account_registry_and_session_selection.sql\`. Reconcile this version mismatch before applying any migration.
-- The live \`amocrm_connections\` and \`mcp_oauth_tokens\` tables currently report zero rows; \`amocrm_oauth_pending\`, MCP pending/code tables have records. Do not assume stale pending records are safe to delete without expiry-aware cleanup.
+- `server.py` imports `provider`, `register_amo_routes`, and `amo_access_token` from `oauth_backend.py`; this is the active authorization implementation.
+- `oauth_backend.py` currently sends MCP authorization to `/oauth/consent`, which requires `MCP_ADMIN_PASSWORD`.
+- The upstream amoCRM integration-button flow currently uses `/connect`, `/oauth/secrets`, and `/oauth/callback`.
+- The callback stores encrypted CRM credentials in `amocrm_connections`, whose primary key is `account_id`.
+- MCP tokens are stored in `mcp_oauth_tokens`; the current JSON payload contains client/scopes/resource but no CRM grant/account binding.
+- `amo_access_token()` resolves an account through `mcp_account_selections` using an MCP principal and Streamable HTTP session ID.
+- `server.py` exposes `list_amocrm_connections`, `select_amocrm_account`, `get_selected_amocrm_account`, and `disconnect_amocrm_connection`.
+- `mcp_account_selections` is an existing Supabase table. This feature stops using it; it does not drop it.
+- `requirements.txt` currently declares `mcp[cli]>=1.30,<2`.
+- Supabase project schema inspection showed `amocrm_connections`, `amocrm_oauth_pending`, `mcp_oauth_clients`, `mcp_oauth_authorization_codes`, `mcp_oauth_tokens`, `mcp_oauth_pending`, `mcp_oauth_codes`, and `mcp_account_selections`. The DB migration history includes six migrations through `20261101051219_multi_account_registry_and_session_selection`; the SQL file in this repository is named `20261101060000_multi_account_registry_and_session_selection.sql`. Reconcile this version mismatch before applying any migration.
+- The live `amocrm_connections` and `mcp_oauth_tokens` tables currently report zero rows; `amocrm_oauth_pending`, MCP pending/code tables have records. Do not assume stale pending records are safe to delete without expiry-aware cleanup.
 
 ## 3. Chosen architecture
 
@@ -38,11 +38,11 @@ The amoCRM access/refresh token is encrypted at rest and never returned to ChatG
 
 1. ChatGPT discovers the MCP protected-resource metadata and the authorization-server metadata.
 2. ChatGPT starts the OAuth authorization-code flow with PKCE S256 and the exact MCP resource indicator.
-3. The active provider creates a short-lived \`mcp_oauth_pending\` transaction containing client ID, redirect URI, original ChatGPT state, PKCE challenge, requested scopes, and resource.
+3. The active provider creates a short-lived `mcp_oauth_pending` transaction containing client ID, redirect URI, original ChatGPT state, PKCE challenge, requested scopes, and resource.
 4. The provider redirects the browser to a transaction-specific amoCRM linking page. This page contains the official amoCRM integration button; it has no owner password, no account catalogue, and no manual account selector.
 5. The page creates a fresh random upstream state and stores a one-to-one binding between that state and the pending MCP transaction.
-6. The amoCRM \`/oauth/secrets\` webhook stores the integration client ID and encrypted client secret against that exact upstream state.
-7. The amoCRM callback validates and consumes the same state, exchanges the upstream code, fetches \`/api/v4/account\`, validates the CRM domain, and upserts the encrypted connection by \`account_id\`.
+6. The amoCRM `/oauth/secrets` webhook stores the integration client ID and encrypted client secret against that exact upstream state.
+7. The amoCRM callback validates and consumes the same state, exchanges the upstream code, fetches `/api/v4/account`, validates the CRM domain, and upserts the encrypted connection by `account_id`.
 8. The callback creates the MCP authorization code for the original ChatGPT redirect URI. It carries the CRM account identity as server-validated authorization context; it never accepts an account ID from a model tool argument.
 9. ChatGPT exchanges the MCP code and PKCE verifier at the MCP token endpoint. The server creates one grant and an access/refresh token pair bound to that grant.
 10. Every MCP tool request resolves the account from the validated access token's grant. The MCP session ID is not an identity or account selector.
@@ -50,48 +50,50 @@ The amoCRM access/refresh token is encrypted at rest and never returned to ChatG
 
 ### 3.2 Account and grant data model
 
-Keep \`amocrm_connections\` as the upstream credential store, keyed by amoCRM \`account_id\`. Multiple MCP grants may reference the same CRM connection.
+Keep `amocrm_connections` as the upstream credential store, keyed by amoCRM `account_id`. Multiple MCP grants may reference the same CRM connection.
 
-Add a server-only \`mcp_oauth_grants\` table:
+Add a server-only `mcp_oauth_grants` table:
 
-- \`grant_id uuid primary key\`
-- \`client_id text not null references mcp_oauth_clients(client_id)\`
-- \`account_id bigint not null references amocrm_connections(account_id)\`
-- \`scopes text[] not null\`
-- \`created_at timestamptz not null default now()\`
-- \`revoked_at timestamptz null\`
+- `grant_id uuid primary key`
+- `client_id text not null references mcp_oauth_clients(client_id)`
+- `account_id bigint not null references amocrm_connections(account_id)`
+- `scopes text[] not null`
+- `created_at timestamptz not null default now()`
+- `revoked_at timestamptz null`
 
-Add \`grant_id uuid\` to \`mcp_oauth_tokens\`, with a foreign key to \`mcp_oauth_grants\` and an index. Both access and refresh token rows carry the same grant ID. The token hash remains the only stored representation of the raw MCP token. The JSON payload retains the exact resource and expiry data needed by the provider.
+Add `grant_id uuid` to `mcp_oauth_tokens`, with a foreign key to `mcp_oauth_grants` and an index. Both access and refresh token rows carry the same grant ID. The token hash remains the only stored representation of the raw MCP token. The JSON payload retains the exact resource and expiry data needed by the provider.
 
-Authorization-code exchange must atomically consume the one-time code, create the grant, and insert the access/refresh token hashes. Prefer a narrowly scoped Postgres RPC with a fixed \`search_path\`, \`SECURITY DEFINER\`, and execution granted only to \`service_role\`; do not split a single-use consume operation into a read followed by an unguarded delete.
+Authorization-code exchange must atomically consume the one-time code, create the grant, and insert the access/refresh token hashes. Prefer a narrowly scoped Postgres RPC with a fixed `search_path`, `SECURITY DEFINER`, and execution granted only to `service_role`; do not split a single-use consume operation into a read followed by an unguarded delete.
 
 Refresh-token rotation must atomically revoke the presented refresh token and create the replacement pair while preserving the grant ID, account binding, scopes, and resource. A revoked grant invalidates every access and refresh token belonging to it.
 
 ### 3.3 Runtime identity
 
-Use \`get_access_token()\` from the MCP Python SDK inside authenticated tool handlers. The access token's server-issued claims identify the grant; the provider must validate that the grant exists, is not revoked, and belongs to the same registered OAuth client before a CRM request proceeds.
+Use `get_access_token()` from the MCP Python SDK inside authenticated tool handlers. The access token's server-issued claims identify the grant; the provider must validate that the grant exists, is not revoked, and belongs to the same registered OAuth client before a CRM request proceeds.
 
 The account resolver must:
 - read the authenticated request token from MCP auth context;
 - load the active grant by its grant ID;
-- load exactly the grant's \`amocrm_connections.account_id\`;
+- load exactly the grant's `amocrm_connections.account_id`;
 - fail closed if token, grant, connection, or resource binding is missing or invalid;
 - never fall back to “the only connected account”, session state, a global account, or model-supplied arguments.
 
-A \`get_profile\` tool returns only the profile represented by the current token. Mark it with \`_meta[\"openai/profile\"] = true\`. Its \`id\` is a stable opaque identifier derived server-side from the immutable amoCRM \`account_id\` (for example, HMAC-SHA256 with a dedicated stable profile key); display metadata includes the current account name and CRM domain. It accepts no account selector and returns no tokens or secrets.
+A `get_profile` tool returns only the profile represented by the current token. Mark it with `_meta[\"openai/profile\"] = true`. Its `id` is a stable opaque identifier derived server-side from the immutable amoCRM `account_id` (for example, HMAC-SHA256 with a dedicated stable profile key); display metadata includes the current account name and CRM domain. It accepts no account selector and returns no tokens or secrets.
 
 ## 4. OAuth and metadata compatibility
 
 - Preserve the MCP SDK's Authorization Code + PKCE provider and DCR route initially; do not add another OAuth framework.
 - Require PKCE S256, exact registered redirect URI validation, one-time authorization codes, short authorization-code expiry, exact MCP resource echo, and client binding at token exchange.
-- The authorization server must publish metadata at \`/.well-known/oauth-authorization-server\`; the MCP resource must publish Protected Resource Metadata at the SDK-supported well-known path. Both must identify the same canonical issuer/resource values used by \`AuthSettings\`.
+- The authorization server must publish metadata at `/.well-known/oauth-authorization-server`; the MCP resource must publish Protected Resource Metadata at the SDK-supported well-known path. Both must identify the same canonical issuer/resource values used by `AuthSettings`.
 - The ChatGPT integration must advertise only token-endpoint authentication methods the deployed provider actually accepts. Confirm DCR behavior and the supported public-client method against the current OpenAI guide and the pinned MCP SDK before rollout.
-- Do not advertise \`authorization_response_iss_parameter_supported: true\` unless every authorization response, including errors, contains the exact issuer parameter. The current MCP SDK authorization handler's error redirect does not visibly add RFC 9207 \`iss\`; therefore the first implementation must either add a tested complete RFC 9207 override or leave the flag false and use ChatGPT's callback-ID-specific redirect. Do not claim stable callback support without this verification.
-- Keep the \`resource\` value canonical and identical in authorization request, pending record, authorization code, issued access/refresh token, and resource-server validation.
+- Do not advertise `authorization_response_iss_parameter_supported: true` unless every authorization response, including errors, contains the exact issuer parameter. The current MCP SDK authorization handler's error redirect does not visibly add RFC 9207 `iss`; therefore the first implementation must either add a tested complete RFC 9207 override or leave the flag false and use ChatGPT's callback-ID-specific redirect. Do not claim stable callback support without this verification.
+- Keep the `resource` value canonical and identical in authorization request, pending record, authorization code, issued access/refresh token, and resource-server validation.
 
-## 5. Upstream callback transaction integrity
+## 5. Upstream callback transaction integrity and cross-user linking risk
 
-The amoCRM button's state is a separate, random, single-use upstream state. Store its hash or exact opaque value only with the corresponding MCP transaction ID, expiry, and webhook status. The secrets webhook and callback must both resolve the same pending row. The callback must consume it once and must not select an MCP transaction from browser session, referer, query-supplied account ID, or most-recent-pending heuristics.
+The amoCRM button's state is a separate, random, single-use upstream state. It is cryptographically random and stored only as a binding to the exact pending MCP transaction, which already contains the ChatGPT client ID, redirect URI, original state, PKCE challenge, scopes, and resource. A callback cannot be reassigned to another pending transaction. This prevents callback swapping and cross-transaction confusion.
+
+The MCP server does not receive a stable ChatGPT human-user identifier in the OAuth authorization request. Therefore, do not claim that server-side state alone proves the human identity of the ChatGPT user. PKCE and the exact registered redirect URI protect authorization-code redemption; ChatGPT itself owns the host account/session binding. The implementation must never accept an account ID from a model tool argument, browser-supplied profile, or a different pending transaction. Treat any attempt to reuse an upstream state across MCP transactions as a security failure. Store its hash or exact opaque value only with the corresponding MCP transaction ID, expiry, and webhook status. The secrets webhook and callback must both resolve the same pending row. The callback must consume it once and must not select an MCP transaction from browser session, referer, query-supplied account ID, or most-recent-pending heuristics.
 
 Validate:
 - pending transaction exists and is unexpired;
@@ -111,11 +113,11 @@ The existing explicit account-disconnect tool is incompatible with host-managed 
 
 ## 7. Legacy and non-goals
 
-- Remove the operator password requirement and \`MCP_ADMIN_PASSWORD\` / \`MCP_AUTH_PASSWORD\` environment documentation once the new flow is active.
+- Remove the operator password requirement and `MCP_ADMIN_PASSWORD` / `MCP_AUTH_PASSWORD` environment documentation once the new flow is active.
 - Remove the password form and password comparison from the active OAuth path.
 - Stop exposing the account catalogue and manual session-selection tools.
-- Stop importing or calling \`get_mcp_selection_identity\`, \`get_selected_amocrm_account_id\`, and \`set_selected_amocrm_account\` from runtime CRM resolution.
-- Keep \`mcp_account_selections\` intact during this change; it becomes unused legacy data and can be dropped in a separate reviewed cleanup.
+- Stop importing or calling `get_mcp_selection_identity`, `get_selected_amocrm_account_id`, and `set_selected_amocrm_account` from runtime CRM resolution.
+- Keep `mcp_account_selections` intact during this change; it becomes unused legacy data and can be dropped in a separate reviewed cleanup.
 - Do not change global AMOCHAT/ElevenLabs provider configuration in this feature. Those credentials are process-global today; preserve the existing fail-closed multiple-account guard and clearly test that it remains in place.
 - Do not change production deployment, production environment variables, or merge the existing PR as part of this specification.
 
@@ -155,7 +157,7 @@ The existing explicit account-disconnect tool is incompatible with host-managed 
 - OAuth 2.0 Security BCP (RFC 9700): https://www.rfc-editor.org/rfc/rfc9700
 - OAuth Authorization Server Issuer Identification (RFC 9207): https://www.rfc-editor.org/rfc/rfc9207
 - OAuth Resource Indicators (RFC 8707): https://www.rfc-editor.org/rfc/rfc8707
-- Consensus security research report: \`docs/research/2026-11-01-multi-account-oauth-security-research.md\`
+- Consensus security research report: `docs/research/2026-11-01-multi-account-oauth-security-research.md`
 
 ## 11. Decisions still requiring product confirmation before implementation
 
