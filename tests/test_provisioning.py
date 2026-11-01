@@ -18,6 +18,16 @@ class ProviderCatalogTests(unittest.TestCase):
         self.assertIn("manual_steps", catalog["zadarma"])
         self.assertIn("manual_steps", catalog["mango_office"])
 
+    def test_provider_catalog_marks_verified_read_only_diagnostics(self):
+        catalog = get_provider_catalog()
+        for provider in ("zadarma", "mango_office", "asterisk"):
+            with self.subTest(provider=provider):
+                self.assertEqual(
+                    catalog[provider]["api_adapter_status"],
+                    "read_only_diagnostics",
+                )
+                self.assertTrue(catalog[provider]["api_available"])
+
     def test_unknown_provider_is_not_silently_mapped_to_generic_sip(self):
         with self.assertRaisesRegex(ValueError, "Unsupported telephony provider"):
             build_client_setup_plan(
